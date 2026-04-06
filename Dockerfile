@@ -1,21 +1,3 @@
-# 多阶段构建 FileCodeBox v2
-# Stage 1: 构建前端
-FROM node:20-alpine AS frontend-builder
-
-WORKDIR /frontend
-
-# 复制前端依赖文件
-COPY frontend/package*.json ./
-
-# 安装依赖
-RUN npm ci
-
-# 复制前端源代码
-COPY frontend/ ./
-
-# 构建前端
-RUN npm run build
-
 # Stage 2: 构建后端
 FROM golang:1.25-alpine AS backend-builder
 
