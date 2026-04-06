@@ -2,8 +2,13 @@ import axios from 'axios'
 import type { AxiosInstance, AxiosRequestConfig } from 'axios'
 import { ElMessage } from 'element-plus'
 
+// 读取 Vite 环境变量：
+//   开发环境 (.env)           -> VITE_API_BASE_URL=''   -> 请求相对路径，由 vite.config.ts proxy 转发
+//   生产环境 (.env.production) -> VITE_API_BASE_URL=https://your-backend.com -> 直接请求宿主机后端
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string || ''
+
 const instance: AxiosInstance = axios.create({
-  baseURL: 'http://localhost:12346',
+  baseURL: API_BASE_URL,
   timeout: 30000,
 })
 

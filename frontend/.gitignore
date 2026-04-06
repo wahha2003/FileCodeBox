@@ -11,6 +11,8 @@ node_modules
 dist
 dist-ssr
 *.local
+# 生产环境配置含后端地址等敏感信息，不提交到仓库
+.env.production
 
 # Editor directories and files
 .vscode/*
