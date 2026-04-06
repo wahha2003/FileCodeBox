@@ -52,8 +52,6 @@ WORKDIR /app
 # 从后端构建阶段复制二进制文件
 COPY --from=backend-builder /app/bin/server ./
 
-# 从前端构建阶段复制静态文件
-COPY --from=frontend-builder /frontend/dist ./static/
 
 # 创建数据目录并设置权限
 RUN mkdir -p data configs && chown -R app:app /app
