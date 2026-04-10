@@ -139,7 +139,7 @@ const formatDate = (dateStr: string): string => {
 
 const getStoragePercentage = (user: any): number => {
   if (!user.total_storage || user.total_storage === 0) return 0
-  const quota = 1073741824 // 1GB
+  const quota = user.quota_limit || 1073741824
   const percentage = (user.total_storage / quota) * 100
   return Math.min(percentage, 100)
 }
@@ -160,15 +160,15 @@ const fetchUsers = async () => {
     })
     
     if (res.code === 200) {
-      if (res.data && Array.isArray(res.data.users)) {
+      if (res.data && Array.isArray(res.data.items)) {
+        usersList.value = res.data.items
+        pagination.total = res.data.total || res.data.items.length
+      } else if (res.data && Array.isArray(res.data.users)) {
         usersList.value = res.data.users
-        pagination.total = res.data.pagination?.total || res.data.users.length
+        pagination.total = res.data.pagination?.total || res.data.total || res.data.users.length
       } else if (Array.isArray(res.data)) {
         usersList.value = res.data
         pagination.total = res.data.length
-      } else if (res.data && Array.isArray(res.data.items)) {
-        usersList.value = res.data.items
-        pagination.total = res.data.total || res.data.items.length
       } else {
         usersList.value = []
       }

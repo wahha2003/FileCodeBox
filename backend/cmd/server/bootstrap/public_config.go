@@ -1,0 +1,59 @@
+package bootstrap
+
+import (
+	"context"
+
+	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/app/server"
+	"github.com/cloudwego/hertz/pkg/protocol/consts"
+	"github.com/zy84338719/fileCodeBox/backend/internal/conf"
+)
+
+type publicConfigData struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	UploadSize  int64    `json:"uploadSize"`
+	EnableChunk int      `json:"enableChunk"`
+	OpenUpload  int      `json:"openUpload"`
+	ExpireStyle []string `json:"expireStyle"`
+}
+
+func registerPublicRoutes(r *server.Hertz) {
+	r.GET("/api/config", getPublicConfig)
+}
+
+func getPublicConfig(ctx context.Context, c *app.RequestContext) {
+	cfg := conf.GetGlobalConfig()
+	if cfg == nil {
+		cfg = &conf.AppConfiguration{}
+	}
+
+	c.JSON(consts.StatusOK, map[string]any{
+		"code":    200,
+		"message": "success",
+		"data": publicConfigData{
+			Name:        firstNonEmpty(cfg.App.Name, "FileCodeBox"),
+			Description: firstNonEmpty(cfg.App.Description, "安全、便捷的文件分享系统"),
+			UploadSize:  cfg.Upload.UploadSize,
+			EnableChunk: boolToInt(cfg.Upload.EnableChunk),
+			OpenUpload:  boolToInt(cfg.Upload.OpenUpload),
+			ExpireStyle: []string{"minute", "hour", "day", "week", "month", "year", "forever"},
+		},
+	})
+}
+
+func boolToInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}

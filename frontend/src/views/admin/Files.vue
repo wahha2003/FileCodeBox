@@ -29,7 +29,7 @@
               </div>
               <div class="file-details">
                 <div class="file-name">
-                  {{ row.uuid_file_name || row.code }}
+                  {{ row.file_name || row.uuid_file_name || row.code }}
                 </div>
                 <div class="file-code">
                   <el-tag size="small" type="info">
@@ -51,9 +51,9 @@
 
         <el-table-column label="上传类型" width="120" align="center">
           <template #default="{ row }">
-            <el-tag :type="row.text ? 'success' : 'primary'" effect="light">
-              <el-icon><component :is="row.text ? 'Document' : 'Picture'" /></el-icon>
-              {{ row.text ? '文本' : '文件' }}
+            <el-tag :type="row.is_text_share ? 'success' : 'primary'" effect="light">
+              <el-icon><component :is="row.is_text_share ? 'Document' : 'Picture'" /></el-icon>
+              {{ row.is_text_share ? '文本' : '文件' }}
             </el-tag>
           </template>
         </el-table-column>
@@ -76,9 +76,9 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="CreatedAt" label="创建时间" width="180">
+        <el-table-column prop="created_at" label="创建时间" width="180">
           <template #default="{ row }">
-            {{ formatDate(row.CreatedAt) }}
+            {{ formatDate(row.created_at) }}
           </template>
         </el-table-column>
 
@@ -166,7 +166,7 @@ const isExpired = (dateStr: string): boolean => {
 }
 
 const getFileIcon = (row: any) => {
-  const filename = row.uuid_file_name || ''
+  const filename = row.file_name || row.uuid_file_name || ''
   const ext = filename.split('.').pop()?.toLowerCase()
   
   const iconMap: Record<string, any> = {
@@ -184,7 +184,7 @@ const getFileIcon = (row: any) => {
 }
 
 const getFileIconColor = (row: any) => {
-  const filename = row.uuid_file_name || ''
+  const filename = row.file_name || row.uuid_file_name || ''
   const ext = filename.split('.').pop()?.toLowerCase()
   
   const colorMap: Record<string, string> = {
@@ -210,12 +210,12 @@ const fetchFiles = async () => {
     })
     
     if (res.code === 200) {
-      if (res.data && Array.isArray(res.data.list)) {
-        filesList.value = res.data.list
-        pagination.total = res.data.total || res.data.list.length
-      } else if (res.data && Array.isArray(res.data.items)) {
+      if (res.data && Array.isArray(res.data.items)) {
         filesList.value = res.data.items
         pagination.total = res.data.total || res.data.items.length
+      } else if (res.data && Array.isArray(res.data.list)) {
+        filesList.value = res.data.list
+        pagination.total = res.data.total || res.data.list.length
       } else if (Array.isArray(res.data)) {
         filesList.value = res.data
         pagination.total = res.data.length
@@ -235,7 +235,7 @@ const fetchFiles = async () => {
 const deleteFile = async (file: any) => {
   try {
     await ElMessageBox.confirm(
-      `确定要删除文件 ${file.uuid_file_name || file.code} 吗？`,
+      `确定要删除文件 ${file.file_name || file.uuid_file_name || file.code} 吗？`,
       '确认删除',
       { 
         type: 'warning',

@@ -18,10 +18,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// 使用 internal/conf 包中的统一配置类型
 type Config = conf.AppConfiguration
 
-// CORS 跨域中间件
 func CORS() app.HandlerFunc {
 	return func(ctx context.Context, c *app.RequestContext) {
 		origin := string(c.GetHeader("Origin"))
@@ -29,15 +27,13 @@ func CORS() app.HandlerFunc {
 			origin = "*"
 		}
 
-		// 设置 CORS 头
 		c.Header("Access-Control-Allow-Origin", origin)
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
 		c.Header("Access-Control-Expose-Headers", "Content-Length, Access-Control-Allow-Origin, Access-Control-Allow-Headers, Content-Type")
 		c.Header("Access-Control-Allow-Credentials", "true")
-		c.Header("Access-Control-Max-Age", "86400") // 24小时
+		c.Header("Access-Control-Max-Age", "86400")
 
-		// 处理预检请求
 		if string(c.Method()) == "OPTIONS" {
 			c.AbortWithStatus(204)
 			return
@@ -47,24 +43,20 @@ func CORS() app.HandlerFunc {
 	}
 }
 
-// GetConfig 获取全局配置
 func GetConfig() *Config {
 	return config
 }
 
-// InitConfig 初始化配置
 func InitConfig(configPath string) (*Config, error) {
 	v := viper.New()
 	v.SetConfigFile(configPath)
 	v.SetConfigType("yaml")
 
-	// 设置默认值
 	v.SetDefault("server.host", "0.0.0.0")
 	v.SetDefault("server.port", 12345)
 	v.SetDefault("server.mode", "debug")
 	v.SetDefault("database.driver", "sqlite")
 	v.SetDefault("database.db_name", "./data/filecodebox.db")
-	// 用户配置默认值
 	v.SetDefault("user.allow_user_registration", true)
 	v.SetDefault("user.require_email_verify", false)
 	v.SetDefault("user.jwt_secret", "FileCodeBox2025JWT")
@@ -81,39 +73,30 @@ func InitConfig(configPath string) (*Config, error) {
 	return &config, nil
 }
 
-// InitDatabase 初始化数据库
 func InitDatabase(config *conf.DatabaseConfig) (*gorm.DB, error) {
-	// 创建数据目录
 	if config.Driver == "sqlite" {
-		// 确保数据目录存在
 		dbPath := config.DBName
 		if dbPath != ":memory:" {
-			// 创建目录（如果需要）
-			// 这里简化处理，GORM 会自动创建数据库文件
 			log.Printf("SQLite database path: %s", dbPath)
 		}
 	}
 
-	// 初始化数据库连接
-	err := db.Init(config)
-	if err != nil {
+	if err := db.Init(config); err != nil {
 		return nil, fmt.Errorf("failed to connect database: %w", err)
 	}
 
 	database := db.GetDB()
 
-	// 自动迁移表结构
 	log.Println("Auto migrating database tables...")
-	err = database.AutoMigrate(
+	if err := database.AutoMigrate(
 		&model.User{},
 		&model.FileCode{},
 		&model.UploadChunk{},
 		&model.TransferLog{},
 		&model.AdminOperationLog{},
 		&model.UserAPIKey{},
-		&model.FilePreview{}, // 添加预览表
-	)
-	if err != nil {
+		&model.FilePreview{},
+	); err != nil {
 		return nil, fmt.Errorf("failed to migrate database: %w", err)
 	}
 
@@ -121,7 +104,6 @@ func InitDatabase(config *conf.DatabaseConfig) (*gorm.DB, error) {
 	return database, nil
 }
 
-// CreateDefaultAdmin 创建默认管理员
 func CreateDefaultAdmin(database *gorm.DB) error {
 	var count int64
 	database.Model(&model.User{}).Where("role = ?", "admin").Count(&count)
@@ -131,7 +113,6 @@ func CreateDefaultAdmin(database *gorm.DB) error {
 		return nil
 	}
 
-	// 创建默认管理员
 	admin := &model.User{
 		Username:     "admin",
 		Email:        "admin@filecodebox.local",
@@ -154,19 +135,15 @@ var (
 	config   *Config
 )
 
-// Bootstrap 应用程序启动入口
 func Bootstrap() (*server.Hertz, error) {
-	// 1. 初始化配置
 	var err error
 	config, err = InitConfig("configs/config.yaml")
 	if err != nil {
 		return nil, fmt.Errorf("failed to init config: %w", err)
 	}
 
-	// 设置全局配置（供其他包访问）
 	conf.SetGlobalConfig(config)
 
-	// 2. 初始化日志
 	loggerConfig := &logger.Config{
 		Level:      config.Log.Level,
 		Filename:   config.Log.Filename,
@@ -179,23 +156,19 @@ func Bootstrap() (*server.Hertz, error) {
 		return nil, fmt.Errorf("failed to init logger: %w", err)
 	}
 
-	// 3. 初始化数据库
 	database, err = InitDatabase(&config.Database)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init database: %w", err)
 	}
 
-	// 4. 创建默认管理员
 	if err := CreateDefaultAdmin(database); err != nil {
 		logger.Error("Failed to create default admin", zap.Error(err))
 	}
 
-	// 4.5 初始化预览服务
 	if err := initPreviewService(); err != nil {
 		logger.Error("Failed to init preview service", zap.Error(err))
 	}
 
-	// 5. 创建 HTTP 服务器
 	port := config.Server.Port
 	if port == 0 {
 		port = 12345
@@ -204,20 +177,15 @@ func Bootstrap() (*server.Hertz, error) {
 		server.WithHostPorts(fmt.Sprintf("%s:%d", config.Server.Host, port)),
 	)
 
-	// 添加 CORS 中间件
 	h.Use(CORS())
 
-	// 6. 注册路由
 	router.GeneratedRegister(h)
-
-	// 7. 注册自定义路由
 	customizedRegister(h)
 
 	logger.Info("Application bootstrap completed successfully")
 	return h, nil
 }
 
-// Cleanup 清理资源
 func Cleanup() {
 	logger.Info("Cleaning up resources...")
 
@@ -230,12 +198,11 @@ func Cleanup() {
 	logger.Sync()
 }
 
-// customizedRegister registers customize routers.
 func customizedRegister(r *server.Hertz) {
-	// 这里可以添加自定义路由，现在为空，所有的路由都通过 GeneratedRegister 注册
+	registerPublicRoutes(r)
+	registerExtraRoutes(r)
 }
 
-// initPreviewService 初始化预览服务
 func initPreviewService() error {
 	previewConfig := &previewPkg.Config{
 		EnablePreview:    true,

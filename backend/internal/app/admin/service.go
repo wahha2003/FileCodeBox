@@ -93,10 +93,10 @@ func (s *Service) GetStats(ctx context.Context) (*AdminStats, error) {
 	}
 
 	// 获取今日下载（从 transfer_log 统计）
-	// todayDownloads, err := s.transferLogRepo.CountTodayDownloads(ctx)
-	// if err == nil {
-	// 	stats.TodayDownloads = todayDownloads
-	// }
+	todayDownloads, err := s.transferLogRepo.CountTodayByOperation(ctx, "download")
+	if err == nil {
+		stats.TodayDownloads = todayDownloads
+	}
 
 	// 统计匿名上传和用户上传
 	// anonymousFiles, _ := s.fileCodeRepo.CountByUploadType(ctx, "anonymous")

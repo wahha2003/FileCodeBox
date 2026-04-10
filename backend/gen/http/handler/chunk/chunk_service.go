@@ -18,6 +18,7 @@ import (
 	chunkmodel "github.com/zy84338719/fileCodeBox/backend/gen/http/model/chunk"
 	chunkService "github.com/zy84338719/fileCodeBox/backend/internal/app/chunk"
 	shareService "github.com/zy84338719/fileCodeBox/backend/internal/app/share"
+	userService "github.com/zy84338719/fileCodeBox/backend/internal/app/user"
 	"github.com/zy84338719/fileCodeBox/backend/internal/pkg/utils"
 	"github.com/zy84338719/fileCodeBox/backend/internal/storage"
 )
@@ -25,6 +26,7 @@ import (
 var chunkSvc *chunkService.Service
 var shareSvc *shareService.Service
 var storageSvc storage.StorageInterface
+var userSvc = userService.NewService()
 
 // 配置常量（应从配置读取，这里使用默认值）
 const (
@@ -53,6 +55,7 @@ func getStorageService() storage.StorageInterface {
 func getShareService() *shareService.Service {
 	if shareSvc == nil {
 		shareSvc = shareService.NewService(defaultBaseURL, getStorageService())
+		shareSvc.SetUserService(userSvc)
 	}
 	return shareSvc
 }
@@ -423,9 +426,10 @@ func ChunkUploadComplete(ctx context.Context, c *app.RequestContext) {
 
 	// 创建分享记录
 	shareReq := &shareService.ShareFileReq{
-		FilePath:     relativePath,
+		FilePath:     filepath.Dir(relativePath),
+		FileName:     info.FileName,
+		StoredName:   filepath.Base(relativePath),
 		Size:         info.FileSize,
-		Text:         info.FileName,
 		ExpiredAt:    expireTime,
 		ExpiredCount: expireCount,
 		RequireAuth:  req.RequireAuth,

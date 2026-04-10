@@ -2,6 +2,7 @@ package dao
 
 import (
 	"context"
+	"time"
 
 	"github.com/zy84338719/fileCodeBox/backend/internal/repo/db"
 	"github.com/zy84338719/fileCodeBox/backend/internal/repo/db/model"
@@ -67,4 +68,19 @@ func (r *TransferLogRepository) List(ctx context.Context, query model.TransferLo
 	}
 
 	return logs, total, nil
+}
+
+func (r *TransferLogRepository) CountTodayByOperation(ctx context.Context, operation string) (int64, error) {
+	var count int64
+	startOfDay := time.Now().Format("2006-01-02")
+
+	dbQuery := r.db().WithContext(ctx).Model(&model.TransferLog{}).Where("created_at >= ?", startOfDay)
+	if operation != "" {
+		dbQuery = dbQuery.Where("operation = ?", operation)
+	}
+
+	if err := dbQuery.Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
 }

@@ -196,21 +196,7 @@ export const adminApi = {
 
   // 获取系统配置
   getConfig: () => {
-    return request<ApiResponse<{
-      base: {
-        name: string
-        description: string
-        port: number
-      }
-      storage: {
-        type: string
-        max_size: number
-      }
-      transfer: {
-        max_count: number
-        expire_default: number
-      }
-    }>>({
+    return request<ApiResponse<any>>({
       url: '/admin/config',
       method: 'GET',
     })
@@ -229,7 +215,7 @@ export const adminApi = {
   },
 
   // 更新基础配置
-  updateBasicConfig: (data: any) => adminApi.updateConfig({ basic: data }),
+  updateBasicConfig: (data: any) => adminApi.updateConfig({ base: data }),
 
   // 更新安全配置
   updateSecurityConfig: (data: any) => adminApi.updateConfig({ security: data }),
@@ -251,15 +237,24 @@ export const adminApi = {
 
   // 获取系统信息
   getSystemInfo: () => {
-    return request<ApiResponse<{
-      go_version: string
-      build_time: string
-      git_commit: string
-      os_info: string
-      cpu_cores: number
-      filecodebox_version: string
-    }>>({
+    return request<ApiResponse<any>>({
       url: '/admin/maintenance/system-info',
+      method: 'GET'
+    })
+  },
+
+  // 获取存储信息
+  getStorageInfo: () => {
+    return request<ApiResponse<any>>({
+      url: '/admin/storage',
+      method: 'GET'
+    })
+  },
+
+  // 获取存储监控状态
+  getStorageStatus: () => {
+    return request<ApiResponse<any>>({
+      url: '/admin/maintenance/monitor/storage',
       method: 'GET'
     })
   },
@@ -288,7 +283,7 @@ export const adminApi = {
     })
   },
 
-  // 优化数据库（后端未实现，待后端实现后启用）
+  // 优化数据库
   optimizeDatabase: () => {
     return request<ApiResponse<void>>({
       url: '/admin/maintenance/optimize',

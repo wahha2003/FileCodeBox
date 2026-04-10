@@ -7,10 +7,10 @@
 
       <el-descriptions :column="2" border>
         <el-descriptions-item label="存储类型">
-          <el-tag type="info">本地存储</el-tag>
+          <el-tag type="info">{{ storageInfo.storageType || 'local' }}</el-tag>
         </el-descriptions-item>
         <el-descriptions-item label="数据路径">
-          {{ storageInfo.dataPath }}
+          {{ storageInfo.dataPath || '-' }}
         </el-descriptions-item>
         <el-descriptions-item label="总文件数">
           {{ storageInfo.totalFiles }}
@@ -18,11 +18,11 @@
         <el-descriptions-item label="总大小">
           {{ formatFileSize(storageInfo.totalSize) }}
         </el-descriptions-item>
-        <el-descriptions-item label="系统启动时间">
-          {{ formatDate(storageInfo.sysStart) }}
+        <el-descriptions-item label="可用空间">
+          {{ formatFileSize(storageInfo.freeSpace) }}
         </el-descriptions-item>
-        <el-descriptions-item label="运行状态">
-          <el-tag type="success">正常</el-tag>
+        <el-descriptions-item label="使用率">
+          <el-tag type="success">{{ storageInfo.usagePercent.toFixed(2) }}%</el-tag>
         </el-descriptions-item>
       </el-descriptions>
 
@@ -34,10 +34,10 @@
           type="info"
           :closable="false"
         >
-          <p>• 文件存储在服务器的本地文件系统中</p>
+          <p>• 当前页面展示后端实际返回的存储配置与监控状态</p>
           <p>• 数据库文件：{{ storageInfo.dataPath }}/filecodebox.db</p>
           <p>• 上传文件目录：{{ storageInfo.dataPath }}/uploads/</p>
-          <p>• 系统版本：{{ storageInfo.version }}</p>
+          <p>• 当前存储标识：{{ storageInfo.current || storageInfo.storageType }}</p>
         </el-alert>
       </div>
     </el-card>
@@ -51,11 +51,13 @@ import { adminApi } from '@/api/admin'
 const loading = ref(false)
 
 const storageInfo = reactive({
-  dataPath: '/Users/zhangyi/FileCodeBox/data',
+  current: '',
+  storageType: '',
+  dataPath: '',
   totalFiles: 0,
   totalSize: 0,
-  sysStart: '',
-  version: ''
+  freeSpace: 0,
+  usagePercent: 0
 })
 
 const formatFileSize = (bytes: number): string => {
@@ -66,30 +68,29 @@ const formatFileSize = (bytes: number): string => {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
 
-const formatDate = (timestamp: string): string => {
-  if (!timestamp) return '-'
-  try {
-    const date = new Date(parseInt(timestamp))
-    return date.toLocaleString('zh-CN')
-  } catch {
-    return '-'
-  }
-}
-
 const fetchStorageInfo = async () => {
   loading.value = true
   try {
-    const res = await adminApi.getSystemInfo()
-    if (res.code === 200 && res.data) {
-      storageInfo.version = res.data.filecodebox_version || 'v1.0.0'
+    const [infoRes, statusRes] = await Promise.all([
+      adminApi.getStorageInfo(),
+      adminApi.getStorageStatus()
+    ])
+
+    if (infoRes.code === 200 && infoRes.data) {
+      storageInfo.current = infoRes.data.current || ''
+      storageInfo.storageType = infoRes.data.current || ''
+      storageInfo.dataPath =
+        infoRes.data.storage_config?.storage_path ||
+        infoRes.data.storage_details?.[infoRes.data.current]?.storage_path ||
+        ''
     }
 
-    // 获取统计数据
-    const statsRes = await adminApi.getStats()
-    if (statsRes.code === 200 && statsRes.data) {
-      storageInfo.totalFiles = statsRes.data.total_files || 0
-      storageInfo.totalSize = statsRes.data.total_size || 0
-      storageInfo.sysStart = statsRes.data.sys_start || ''
+    if (statusRes.code === 200 && statusRes.data) {
+      storageInfo.storageType = statusRes.data.storage_type || storageInfo.storageType
+      storageInfo.totalFiles = statusRes.data.file_count || 0
+      storageInfo.totalSize = statusRes.data.used_space || 0
+      storageInfo.freeSpace = statusRes.data.free_space || 0
+      storageInfo.usagePercent = statusRes.data.usage_percent || 0
     }
   } catch (error) {
     console.error('获取存储信息失败:', error)

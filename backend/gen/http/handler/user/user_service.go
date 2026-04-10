@@ -13,6 +13,7 @@ import (
 	usermodel "github.com/zy84338719/fileCodeBox/backend/gen/http/model/user"
 	userservice "github.com/zy84338719/fileCodeBox/backend/internal/app/user"
 	"github.com/zy84338719/fileCodeBox/backend/internal/conf"
+	dbmodel "github.com/zy84338719/fileCodeBox/backend/internal/repo/db/model"
 )
 
 var userService = userservice.NewService()
@@ -56,21 +57,11 @@ func Register(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 
-	resp := &usermodel.RegisterResp{
-		Code:    200,
-		Message: "注册成功",
-		Data: &usermodel.UserData{
-			Id:        uint32(result.ID),
-			Username:  result.Username,
-			Email:     result.Email,
-			Nickname:  result.Nickname,
-			Avatar:    result.Avatar,
-			Status:    int32(1),
-			CreatedAt: result.CreatedAt.Format("2006-01-02 15:04:05"),
-		},
-	}
-
-	c.JSON(consts.StatusOK, resp)
+	c.JSON(consts.StatusOK, map[string]interface{}{
+		"code":    200,
+		"message": "注册成功",
+		"data":    buildUserPayload(result),
+	})
 }
 
 // Login .
@@ -97,44 +88,24 @@ func Login(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 
-	resp := &usermodel.LoginResp{
-		Code:    200,
-		Message: "登录成功",
-		Data: &usermodel.LoginData{
-			Token: token,
-			User: &usermodel.UserData{
-				Id:        uint32(userInfo.ID),
-				Username:  userInfo.Username,
-				Email:     userInfo.Email,
-				Nickname:  userInfo.Nickname,
-				Avatar:    userInfo.Avatar,
-				Status:    int32(1),
-				CreatedAt: userInfo.CreatedAt.Format("2006-01-02 15:04:05"),
-			},
+	c.JSON(consts.StatusOK, map[string]interface{}{
+		"code":    200,
+		"message": "登录成功",
+		"data": map[string]interface{}{
+			"token": token,
+			"user":  buildUserPayload(userInfo),
 		},
-	}
-
-	c.JSON(consts.StatusOK, resp)
+	})
 }
 
 // UserInfo .
 // @router /user/info [GET]
 func UserInfo(ctx context.Context, c *app.RequestContext) {
-	// 从上下文获取用户ID
-	userIDVal, exists := c.Get("user_id")
-	if !exists {
+	userID, ok := currentUserID(c)
+	if !ok {
 		c.JSON(consts.StatusOK, map[string]interface{}{
 			"code":    200,
 			"message": "获取成功",
-		})
-		return
-	}
-
-	userID, ok := userIDVal.(uint)
-	if !ok {
-		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
-			"code":    500,
-			"message": "用户ID类型错误",
 		})
 		return
 	}
@@ -149,29 +120,43 @@ func UserInfo(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 
-	resp := &usermodel.UserInfoResp{
-		Code:    200,
-		Message: "获取成功",
-		Data: &usermodel.UserData{
-			Id:        uint32(user.ID),
-			Username:  user.Username,
-			Email:     user.Email,
-			Nickname:  user.Nickname,
-			Avatar:    user.Avatar,
-			Status:    int32(1),
-			CreatedAt: user.CreatedAt.Format("2006-01-02 15:04:05"),
-		},
-	}
-
-	c.JSON(consts.StatusOK, resp)
+	c.JSON(consts.StatusOK, map[string]interface{}{
+		"code":    200,
+		"message": "获取成功",
+		"data":    buildUserPayload(user),
+	})
 }
 
 // UpdateProfile .
 // @router /user/profile [PUT]
 func UpdateProfile(ctx context.Context, c *app.RequestContext) {
-	var err error
-	var req usermodel.UpdateProfileReq
-	err = c.BindAndValidate(&req)
+	userID, ok := currentUserID(c)
+	if !ok {
+		c.JSON(consts.StatusUnauthorized, map[string]interface{}{
+			"code":    401,
+			"message": "用户未登录",
+		})
+		return
+	}
+
+	var req struct {
+		Nickname string `json:"nickname"`
+		Avatar   string `json:"avatar"`
+		Email    string `json:"email"`
+	}
+	if err := c.Bind(&req); err != nil {
+		c.JSON(consts.StatusBadRequest, map[string]interface{}{
+			"code":    400,
+			"message": "请求参数错误: " + err.Error(),
+		})
+		return
+	}
+
+	updatedUser, err := userService.Update(ctx, userID, &userservice.UpdateUserReq{
+		Email:    strings.TrimSpace(req.Email),
+		Nickname: strings.TrimSpace(req.Nickname),
+		Avatar:   strings.TrimSpace(req.Avatar),
+	})
 	if err != nil {
 		c.JSON(consts.StatusBadRequest, map[string]interface{}{
 			"code":    400,
@@ -180,23 +165,27 @@ func UpdateProfile(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 
-	// TODO: 实现资料更新
-
-	resp := &usermodel.UpdateProfileResp{
-		Code:    200,
-		Message: "更新成功",
-	}
-
-	c.JSON(consts.StatusOK, resp)
+	c.JSON(consts.StatusOK, map[string]interface{}{
+		"code":    200,
+		"message": "更新成功",
+		"data":    buildUserPayload(updatedUser),
+	})
 }
 
 // ChangePassword .
 // @router /user/change-password [POST]
 func ChangePassword(ctx context.Context, c *app.RequestContext) {
-	var err error
+	userID, ok := currentUserID(c)
+	if !ok {
+		c.JSON(consts.StatusUnauthorized, map[string]interface{}{
+			"code":    401,
+			"message": "用户未登录",
+		})
+		return
+	}
+
 	var req usermodel.ChangePasswordReq
-	err = c.BindAndValidate(&req)
-	if err != nil {
+	if err := c.BindAndValidate(&req); err != nil {
 		c.JSON(consts.StatusBadRequest, map[string]interface{}{
 			"code":    400,
 			"message": err.Error(),
@@ -204,34 +193,80 @@ func ChangePassword(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 
-	// TODO: 实现密码修改
-
-	resp := &usermodel.ChangePasswordResp{
-		Code:    200,
-		Message: "密码修改成功",
+	if strings.TrimSpace(req.OldPassword) == "" || strings.TrimSpace(req.NewPassword) == "" {
+		c.JSON(consts.StatusBadRequest, map[string]interface{}{
+			"code":    400,
+			"message": "新旧密码不能为空",
+		})
+		return
 	}
 
-	c.JSON(consts.StatusOK, resp)
+	if err := userService.ChangePassword(ctx, userID, req.OldPassword, req.NewPassword); err != nil {
+		c.JSON(consts.StatusBadRequest, map[string]interface{}{
+			"code":    400,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(consts.StatusOK, map[string]interface{}{
+		"code":    200,
+		"message": "密码修改成功",
+	})
 }
 
 // UserStats .
 // @router /user/stats [GET]
 func UserStats(ctx context.Context, c *app.RequestContext) {
-	// TODO: 从上下文获取用户ID（需要认证中间件）
-	// userID := middleware.GetUserID(c)
-
-	resp := &usermodel.UserStatsResp{
-		Code:    200,
-		Message: "获取成功",
-		Data: &usermodel.UserStats{
-			TotalUploads: 0,
-			TotalSize:    0,
-			QuotaUsed:    0,
-			QuotaLimit:   0,
-		},
+	userID, ok := currentUserID(c)
+	if !ok {
+		c.JSON(consts.StatusUnauthorized, map[string]interface{}{
+			"code":    401,
+			"message": "用户未登录",
+		})
+		return
 	}
 
-	c.JSON(consts.StatusOK, resp)
+	stats, err := userService.GetStats(ctx, userID)
+	if err != nil {
+		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
+			"code":    500,
+			"message": "获取用户统计失败",
+		})
+		return
+	}
+
+	userInfo, err := userService.GetByID(ctx, userID)
+	if err != nil {
+		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
+			"code":    500,
+			"message": "获取用户信息失败",
+		})
+		return
+	}
+
+	quotaLimit := userInfo.MaxStorageQuota
+	if quotaLimit == 0 {
+		if cfg := conf.GetGlobalConfig(); cfg != nil {
+			quotaLimit = cfg.User.UserStorageQuota
+		}
+	}
+
+	c.JSON(consts.StatusOK, map[string]interface{}{
+		"code":    200,
+		"message": "获取成功",
+		"data": map[string]interface{}{
+			"total_uploads":     stats.TotalUploads,
+			"total_downloads":   stats.TotalDownloads,
+			"total_storage":     stats.TotalStorage,
+			"max_storage_quota": quotaLimit,
+			"file_count":        stats.FileCount,
+			"current_files":     stats.FileCount,
+			"total_size":        stats.TotalStorage,
+			"quota_used":        stats.TotalStorage,
+			"quota_limit":       quotaLimit,
+		},
+	})
 }
 
 // UserFiles .
@@ -492,6 +527,41 @@ func DeleteAPIKey(ctx context.Context, c *app.RequestContext) {
 		"code":    200,
 		"message": "API Key 已撤销",
 	})
+}
+
+func currentUserID(c *app.RequestContext) (uint, bool) {
+	userIDVal, exists := c.Get("user_id")
+	if !exists {
+		return 0, false
+	}
+	userID, ok := userIDVal.(uint)
+	return userID, ok
+}
+
+func userStatusCode(status string) int32 {
+	if status == "active" {
+		return 1
+	}
+	return 0
+}
+
+func buildUserPayload(user *dbmodel.UserResp) map[string]interface{} {
+	return map[string]interface{}{
+		"id":                user.ID,
+		"username":          user.Username,
+		"email":             user.Email,
+		"nickname":          user.Nickname,
+		"avatar":            user.Avatar,
+		"role":              user.Role,
+		"status":            userStatusCode(user.Status),
+		"status_text":       user.Status,
+		"total_uploads":     user.TotalUploads,
+		"total_downloads":   user.TotalDownloads,
+		"total_storage":     user.TotalStorage,
+		"max_upload_size":   user.MaxUploadSize,
+		"max_storage_quota": user.MaxStorageQuota,
+		"created_at":        user.CreatedAt.Format("2006-01-02 15:04:05"),
+	}
 }
 
 // formatTime 格式化时间指针为字符串

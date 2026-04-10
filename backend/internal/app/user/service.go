@@ -26,6 +26,7 @@ type CreateUserReq struct {
 }
 
 type UpdateUserReq struct {
+	Email    string
 	Nickname string
 	Avatar   string
 	Role     string
@@ -118,6 +119,16 @@ func (s *Service) Update(ctx context.Context, id uint, req *UpdateUserReq) (*mod
 		return nil, err
 	}
 
+	if req.Email != "" && req.Email != user.Email {
+		existing, err := s.repo.GetByEmail(ctx, req.Email)
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+		if existing != nil && existing.ID != user.ID {
+			return nil, errors.New("email already exists")
+		}
+		user.Email = req.Email
+	}
 	if req.Nickname != "" {
 		user.Nickname = req.Nickname
 	}
@@ -278,12 +289,18 @@ func (s *Service) GetStats(ctx context.Context, userID uint) (*model.UserStats, 
 		return nil, err
 	}
 
+	fileCodeRepo := dao.NewFileCodeRepository()
+	fileCount, err := fileCodeRepo.CountByUserID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
 	return &model.UserStats{
 		UserID:         user.ID,
 		TotalUploads:   user.TotalUploads,
 		TotalDownloads: user.TotalDownloads,
 		TotalStorage:   user.TotalStorage,
-		FileCount:      0, // TODO: 从 FileCode 表统计
+		FileCount:      int(fileCount),
 	}, nil
 }
 

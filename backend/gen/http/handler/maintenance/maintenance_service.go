@@ -4,10 +4,13 @@ package maintenance
 
 import (
 	"context"
+	"fmt"
+	"runtime"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	adminsvc "github.com/zy84338719/fileCodeBox/backend/internal/app/admin"
+	"github.com/zy84338719/fileCodeBox/backend/internal/conf"
 )
 
 var adminService *adminsvc.Service
@@ -19,7 +22,7 @@ func init() {
 // CleanExpiredFiles 清理过期文件
 // @router /admin/maintenance/clean-expired [POST]
 func CleanExpiredFiles(ctx context.Context, c *app.RequestContext) {
-	count, err := adminService.CleanupExpiredFiles(ctx)
+	count, freedSpace, err := adminService.CleanExpiredFiles(ctx)
 	if err != nil {
 		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
 			"code":    500,
@@ -32,6 +35,7 @@ func CleanExpiredFiles(ctx context.Context, c *app.RequestContext) {
 		"message": "清理完成",
 		"data": map[string]interface{}{
 			"deleted_count": count,
+			"freed_space":   freedSpace,
 		},
 	})
 }
@@ -59,38 +63,95 @@ func CleanTempFiles(ctx context.Context, c *app.RequestContext) {
 // GetSystemLogs 获取系统日志
 // @router /admin/maintenance/logs [GET]
 func GetSystemLogs(ctx context.Context, c *app.RequestContext) {
-	logs := []map[string]interface{}{}
+	level := c.Query("level")
+	page := 1
+	pageSize := 20
+	if _, err := fmt.Sscanf(c.DefaultQuery("page", "1"), "%d", &page); err != nil {
+		page = 1
+	}
+	if _, err := fmt.Sscanf(c.DefaultQuery("page_size", "20"), "%d", &pageSize); err != nil {
+		pageSize = 20
+	}
+
+	logs, total, err := adminService.GetSystemLogs(ctx, level, page, pageSize)
+	if err != nil {
+		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
+			"code":    500,
+			"message": "获取系统日志失败: " + err.Error(),
+		})
+		return
+	}
+
+	items := make([]map[string]interface{}, 0, len(logs))
+	for _, logEntry := range logs {
+		items = append(items, map[string]interface{}{
+			"id":         logEntry.ID,
+			"level":      logEntry.Level,
+			"message":    logEntry.Message,
+			"created_at": logEntry.CreatedAt,
+			"module":     logEntry.Module,
+			"user_id":    logEntry.UserID,
+		})
+	}
 	c.JSON(consts.StatusOK, map[string]interface{}{
-		"code": 200,
-		"data": logs,
+		"code":    200,
+		"message": "获取成功",
+		"data": map[string]interface{}{
+			"logs":      items,
+			"total":     total,
+			"page":      page,
+			"page_size": pageSize,
+		},
 	})
 }
 
 // GetSystemInfo 获取系统信息
 // @router /admin/maintenance/system-info [GET]
 func GetSystemInfo(ctx context.Context, c *app.RequestContext) {
+	cfg := conf.GetGlobalConfig()
+	version := "unknown"
+	if cfg != nil && cfg.App.Version != "" {
+		version = cfg.App.Version
+	}
+
 	info := map[string]interface{}{
-		"go_version": "1.25",
-		"os":         "linux",
-		"arch":       "amd64",
+		"version":             version,
+		"filecodebox_version": version,
+		"go_version":          runtime.Version(),
+		"build_time":          "unknown",
+		"git_commit":          "unknown",
+		"os_info":             runtime.GOOS + "/" + runtime.GOARCH,
+		"cpu_cores":           runtime.NumCPU(),
 	}
 	c.JSON(consts.StatusOK, map[string]interface{}{
-		"code": 200,
-		"data": info,
+		"code":    200,
+		"message": "获取成功",
+		"data":    info,
 	})
 }
 
 // GetStorageStatus 获取存储状态
 // @router /admin/maintenance/monitor/storage [GET]
 func GetStorageStatus(ctx context.Context, c *app.RequestContext) {
-	status := map[string]interface{}{
-		"type":       "local",
-		"total_size": 0,
-		"used_size":  0,
-		"available":  true,
+	status, err := adminService.GetStorageStatus(ctx)
+	if err != nil {
+		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
+			"code":    500,
+			"message": "获取存储状态失败: " + err.Error(),
+		})
+		return
 	}
+
 	c.JSON(consts.StatusOK, map[string]interface{}{
-		"code": 200,
-		"data": status,
+		"code":    200,
+		"message": "获取成功",
+		"data": map[string]interface{}{
+			"storage_type":  status.StorageType,
+			"total_space":   status.TotalSpace,
+			"used_space":    status.UsedSpace,
+			"free_space":    status.FreeSpace,
+			"file_count":    status.FileCount,
+			"usage_percent": status.UsagePercent,
+		},
 	})
 }

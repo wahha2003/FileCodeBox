@@ -82,6 +82,13 @@ func (r *UserRepository) Count(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+// CountByStatus returns the total number of users by status.
+func (r *UserRepository) CountByStatus(ctx context.Context, status string) (int64, error) {
+	var count int64
+	err := r.db().WithContext(ctx).Model(&model.User{}).Where("status = ?", status).Count(&count).Error
+	return count, err
+}
+
 // CountAdminUsers returns the total number of admin users
 func (r *UserRepository) CountAdminUsers(ctx context.Context) (int64, error) {
 	var count int64

@@ -15,18 +15,23 @@ type Service struct {
 
 // NewService 创建存储服务
 func NewService() *Service {
+	cfg := conf.GetGlobalConfig()
+	if cfg == nil {
+		cfg = &conf.AppConfiguration{}
+	}
 	return &Service{
-		config: conf.GetGlobalConfig(),
+		config: cfg,
 	}
 }
 
 // GetStorageInfo 获取存储信息
 func (s *Service) GetStorageInfo(ctx context.Context) (*StorageInfo, error) {
+	if s.config == nil {
+		s.config = &conf.AppConfiguration{}
+	}
+
 	// 获取可用存储类型
 	availableStorages := []string{"local"}
-	if s.config.Storage.Type != "" {
-		availableStorages = append(availableStorages, "local")
-	}
 
 	// 获取各存储类型的详细信息
 	storageDetails := make(map[string]*StorageDetail)
@@ -122,6 +127,9 @@ func (s *Service) UpdateStorageConfig(ctx context.Context, req *UpdateConfigRequ
 
 // getStoragePath 获取存储路径
 func (s *Service) getStoragePath() string {
+	if s.config == nil {
+		return "./data"
+	}
 	if s.config.Storage.StoragePath != "" {
 		return s.config.Storage.StoragePath
 	}

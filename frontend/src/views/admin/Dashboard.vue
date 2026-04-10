@@ -260,7 +260,9 @@ const fetchRecentUsers = async () => {
   try {
     const res = await adminApi.getRecentUsers()
     if (res.code === 200) {
-      if (res.data && Array.isArray(res.data.users)) {
+      if (res.data && Array.isArray(res.data.items)) {
+        recentUsers.value = res.data.items.slice(0, 5)
+      } else if (res.data && Array.isArray(res.data.users)) {
         recentUsers.value = res.data.users.slice(0, 5)
       } else if (Array.isArray(res.data)) {
         recentUsers.value = res.data.slice(0, 5)
@@ -278,12 +280,19 @@ const fetchRecentFiles = async () => {
   try {
     const res = await adminApi.getRecentFiles()
     if (res.code === 200) {
-      if (res.data && Array.isArray(res.data.list)) {
-        recentFiles.value = res.data.list.slice(0, 5).map((file: any) => ({
-          filename: file.uuid_file_name || file.code,
-          file_size: file.size || 0,
+      if (res.data && Array.isArray(res.data.items)) {
+        recentFiles.value = res.data.items.slice(0, 5).map((file: any) => ({
+          filename: file.file_name || file.uuid_file_name || file.code,
+          file_size: file.file_size || file.size || 0,
           username: file.username || '-',
-          created_at: file.CreatedAt || file.created_at || ''
+          created_at: file.created_at || ''
+        }))
+      } else if (res.data && Array.isArray(res.data.list)) {
+        recentFiles.value = res.data.list.slice(0, 5).map((file: any) => ({
+          filename: file.file_name || file.uuid_file_name || file.code,
+          file_size: file.file_size || file.size || 0,
+          username: file.username || '-',
+          created_at: file.created_at || file.CreatedAt || ''
         }))
       } else if (Array.isArray(res.data)) {
         recentFiles.value = res.data.slice(0, 5)

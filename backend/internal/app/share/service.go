@@ -25,8 +25,9 @@ type ShareTextReq struct {
 
 type ShareFileReq struct {
 	FilePath     string
+	FileName     string
+	StoredName   string
 	Size         int64
-	Text         string
 	ExpiredAt    *time.Time
 	ExpiredCount int
 	RequireAuth  bool
@@ -174,12 +175,17 @@ func (s *Service) ShareFile(ctx context.Context, req *ShareFileReq) (*ShareResp,
 	s.ensureRepository()
 
 	code := s.GenerateCode()
+	displayName := req.FileName
+	if displayName == "" {
+		displayName = req.StoredName
+	}
 
 	fileCode := &model.FileCode{
 		Code:         code,
 		FilePath:     req.FilePath,
+		UUIDFileName: req.StoredName,
 		Size:         req.Size,
-		Text:         req.Text,
+		Text:         displayName,
 		ExpiredAt:    req.ExpiredAt,
 		ExpiredCount: req.ExpiredCount,
 		RequireAuth:  req.RequireAuth,
@@ -287,7 +293,7 @@ func (s *Service) DeleteFileByCode(ctx context.Context, code string, userID uint
 	}
 
 	// 3. 如果是文件分享，删除物理文件
-	if file.FilePath != "" && file.UUIDFileName != "" {
+	if file.FilePath != "" {
 		// 获取完整的文件路径
 		filePath := file.GetFilePath()
 
@@ -341,7 +347,15 @@ func (s *Service) UpdateFileUsage(ctx context.Context, code string) error {
 	// 增加使用次数
 	fileCode.UsedCount++
 
-	return s.fileCodeRepo.Update(ctx, fileCode)
+	if err := s.fileCodeRepo.Update(ctx, fileCode); err != nil {
+		return err
+	}
+
+	if s.userService != nil && fileCode.UserID != nil {
+		_ = s.userService.UpdateUserStats(*fileCode.UserID, "downloads", 1)
+	}
+
+	return nil
 }
 
 // GetFileWithUsage 获取文件并增加使用次数

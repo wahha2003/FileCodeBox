@@ -161,7 +161,10 @@ const fetchLogs = async () => {
     if (res.code === 200) {
       if (res.data && Array.isArray(res.data.logs)) {
         logsList.value = res.data.logs
-        pagination.total = res.data.pagination?.total || res.data.logs.length
+        pagination.total = res.data.total || res.data.pagination?.total || res.data.logs.length
+      } else if (res.data && Array.isArray(res.data.items)) {
+        logsList.value = res.data.items
+        pagination.total = res.data.total || res.data.items.length
       } else if (Array.isArray(res.data)) {
         logsList.value = res.data
         pagination.total = res.data.length

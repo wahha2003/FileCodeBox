@@ -16,25 +16,34 @@ import (
 	"github.com/google/uuid"
 	sharemodel "github.com/zy84338719/fileCodeBox/backend/gen/http/model/share"
 	shareService "github.com/zy84338719/fileCodeBox/backend/internal/app/share"
+	userService "github.com/zy84338719/fileCodeBox/backend/internal/app/user"
+	"github.com/zy84338719/fileCodeBox/backend/internal/conf"
 	"github.com/zy84338719/fileCodeBox/backend/internal/pkg/utils"
+	"github.com/zy84338719/fileCodeBox/backend/internal/repo/db/dao"
+	dbmodel "github.com/zy84338719/fileCodeBox/backend/internal/repo/db/model"
 	"github.com/zy84338719/fileCodeBox/backend/internal/storage"
 )
 
 var shareSvc *shareService.Service
 var storageSvc storage.StorageInterface
+var userSvc = userService.NewService()
+var transferLogRepo = dao.NewTransferLogRepository()
 
 // 配置常量（应从配置读取，这里使用默认值）
 const (
 	defaultMaxUploadSize = 10485760 // 10MB
-	defaultStoragePath   = "./data/uploads"
 	defaultBaseURL       = "http://localhost:12345"
 )
 
 func getStorageService() storage.StorageInterface {
 	if storageSvc == nil {
+		dataPath := "./data"
+		if cfg := conf.GetGlobalConfig(); cfg != nil && cfg.App.DataPath != "" {
+			dataPath = cfg.App.DataPath
+		}
 		storageSvc = storage.NewStorageService(&storage.StorageConfig{
 			Type:     storage.StorageTypeLocal,
-			DataPath: defaultStoragePath,
+			DataPath: dataPath,
 			BaseURL:  defaultBaseURL,
 		})
 	}
@@ -44,8 +53,93 @@ func getStorageService() storage.StorageInterface {
 func getShareService() *shareService.Service {
 	if shareSvc == nil {
 		shareSvc = shareService.NewService(defaultBaseURL, getStorageService())
+		shareSvc.SetUserService(userSvc)
 	}
 	return shareSvc
+}
+
+func buildBaseURL(c *app.RequestContext) string {
+	scheme := string(c.GetHeader("X-Forwarded-Proto"))
+	if scheme == "" {
+		scheme = string(c.Request.Scheme())
+	}
+	if scheme == "" {
+		scheme = "http"
+	}
+
+	host := string(c.Host())
+	if host == "" {
+		return defaultBaseURL
+	}
+	return fmt.Sprintf("%s://%s", scheme, host)
+}
+
+func buildShareLinks(c *app.RequestContext, code string) (string, string, string) {
+	sharePath := fmt.Sprintf("/share/%s", code)
+	fullShareURL := fmt.Sprintf("%s/#%s", strings.TrimRight(buildBaseURL(c), "/"), sharePath)
+	return sharePath, fullShareURL, fullShareURL
+}
+
+func isTextShare(fileCode *dbmodel.FileCode) bool {
+	return fileCode != nil && fileCode.FilePath == ""
+}
+
+func displayFileName(fileCode *dbmodel.FileCode) string {
+	if fileCode == nil {
+		return ""
+	}
+	if fileCode.FilePath != "" && fileCode.Text != "" {
+		return fileCode.Text
+	}
+	if fileCode.UUIDFileName != "" {
+		return fileCode.UUIDFileName
+	}
+	if fileCode.Prefix != "" || fileCode.Suffix != "" {
+		return fileCode.Prefix + fileCode.Suffix
+	}
+	return ""
+}
+
+func formatExpireTime(expireAt *time.Time) string {
+	if expireAt == nil {
+		return ""
+	}
+	return expireAt.Format("2006-01-02 15:04:05")
+}
+
+func recordTransferLog(ctx context.Context, c *app.RequestContext, operation string, fileCode *dbmodel.FileCode) {
+	if fileCode == nil {
+		return
+	}
+
+	var userID *uint
+	var username string
+	if uid, exists := c.Get("user_id"); exists {
+		if parsedID, ok := uid.(uint); ok {
+			userID = &parsedID
+		}
+	}
+	if uname, exists := c.Get("username"); exists {
+		if parsedName, ok := uname.(string); ok {
+			username = parsedName
+		}
+	}
+
+	fileName := displayFileName(fileCode)
+	if fileName == "" && isTextShare(fileCode) {
+		fileName = "text-share.txt"
+	}
+
+	_ = transferLogRepo.Create(ctx, &dbmodel.TransferLog{
+		Operation:  operation,
+		FileCodeID: fileCode.ID,
+		FileCode:   fileCode.Code,
+		FileName:   fileName,
+		FileSize:   fileCode.Size,
+		UserID:     userID,
+		Username:   username,
+		IP:         c.ClientIP(),
+	})
 }
 
 // ShareText .
@@ -102,16 +196,20 @@ func ShareText(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 
-	resp := &sharemodel.ShareTextResp{
-		Code:    200,
-		Message: "分享成功",
-		Data: &sharemodel.ShareData{
-			Code: result.Code,
-			Url:  result.FullShareURL,
-		},
-	}
+	shareURL, fullShareURL, qrCodeData := buildShareLinks(c, result.Code)
+	createdFile, _ := getShareService().GetFileByCode(ctx, result.Code)
+	recordTransferLog(ctx, c, "upload", createdFile)
 
-	c.JSON(consts.StatusOK, resp)
+	c.JSON(consts.StatusOK, map[string]interface{}{
+		"code":    200,
+		"message": "分享成功",
+		"data": map[string]interface{}{
+			"code":           result.Code,
+			"share_url":      shareURL,
+			"full_share_url": fullShareURL,
+			"qr_code_data":   qrCodeData,
+		},
+	})
 }
 
 // ShareFile .
@@ -196,9 +294,10 @@ func ShareFile(ctx context.Context, c *app.RequestContext) {
 
 	// 11. 构建分享请求
 	shareReq := &shareService.ShareFileReq{
-		FilePath:     result.FilePath,
+		FilePath:     relativePath,
+		FileName:     originalFilename,
+		StoredName:   uuidFileName,
 		Size:         result.FileSize,
-		Text:         originalFilename, // 存储原始文件名
 		ExpiredAt:    expireTime,
 		ExpiredCount: expireCount,
 		RequireAuth:  requireAuth,
@@ -218,22 +317,23 @@ func ShareFile(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 
-	// 13. 构建响应
-	fullShareURL := fmt.Sprintf("%s/share/%s", defaultBaseURL, shareResult.Code)
-
-	resp := &sharemodel.ShareFileResp{
-		Code:    200,
-		Message: "文件上传成功",
-		Data: &sharemodel.ShareData{
-			Code: shareResult.Code,
-			Url:  fullShareURL,
-		},
-	}
-
 	// 保存 password 用于验证（如果需要）
 	_ = password // TODO: 实现密码验证逻辑
 
-	c.JSON(consts.StatusOK, resp)
+	createdFile, _ := getShareService().GetFileByCode(ctx, shareResult.Code)
+	recordTransferLog(ctx, c, "upload", createdFile)
+
+	shareURL, fullShareURL, qrCodeData := buildShareLinks(c, shareResult.Code)
+	c.JSON(consts.StatusOK, map[string]interface{}{
+		"code":    200,
+		"message": "文件上传成功",
+		"data": map[string]interface{}{
+			"code":           shareResult.Code,
+			"share_url":      shareURL,
+			"full_share_url": fullShareURL,
+			"qr_code_data":   qrCodeData,
+		},
+	})
 }
 
 // GetUserShares 获取用户的分享列表
@@ -281,12 +381,17 @@ func GetUserShares(ctx context.Context, c *app.RequestContext) {
 	// 转换为响应格式
 	items := make([]map[string]interface{}, len(files))
 	for i, f := range files {
+		fileName := displayFileName(f)
 		items[i] = map[string]interface{}{
 			"code":           f.Code,
-			"filename":       f.UUIDFileName,
+			"file_name":      fileName,
+			"filename":       fileName,
+			"size":           f.Size,
 			"file_size":      f.Size,
-			"content_type":   f.UploadType,
+			"upload_type":    map[bool]string{true: "text", false: "file"}[isTextShare(f)],
+			"is_text_share":  isTextShare(f),
 			"download_count": f.UsedCount,
+			"used_count":     f.UsedCount,
 			"created_at":     f.CreatedAt.Format("2006-01-02 15:04:05"),
 		}
 		if f.ExpiredAt != nil {
@@ -299,6 +404,7 @@ func GetUserShares(ctx context.Context, c *app.RequestContext) {
 		"message": "获取成功",
 		"data": map[string]interface{}{
 			"items":     items,
+			"files":     items,
 			"total":     total,
 			"page":      page,
 			"page_size": pageSize,
@@ -377,7 +483,7 @@ func GetShare(ctx context.Context, c *app.RequestContext) {
 	password := c.Query("password")
 
 	if code == "" {
-		c.JSON(consts.StatusBadRequest, map[string]interface{}{
+		c.JSON(consts.StatusOK, map[string]interface{}{
 			"code":    400,
 			"message": "请提供分享码",
 		})
@@ -387,7 +493,7 @@ func GetShare(ctx context.Context, c *app.RequestContext) {
 	// 获取分享内容
 	fileCode, err := getShareService().GetFileByCode(ctx, code)
 	if err != nil {
-		c.JSON(consts.StatusNotFound, map[string]interface{}{
+		c.JSON(consts.StatusOK, map[string]interface{}{
 			"code":    404,
 			"message": "分享不存在或已过期",
 		})
@@ -396,8 +502,8 @@ func GetShare(ctx context.Context, c *app.RequestContext) {
 
 	// 检查是否需要密码
 	if fileCode.RequireAuth && password == "" {
-		c.JSON(consts.StatusUnauthorized, map[string]interface{}{
-			"code":    401,
+		c.JSON(consts.StatusOK, map[string]interface{}{
+			"code":    403,
 			"message": "需要密码",
 			"data": map[string]interface{}{
 				"has_password": true,
@@ -408,22 +514,30 @@ func GetShare(ctx context.Context, c *app.RequestContext) {
 
 	// TODO: 验证密码
 
-	// 构建响应
-	resp := &sharemodel.GetShareResp{
-		Code:    200,
-		Message: "获取成功",
-		Data: &sharemodel.ShareDetail{
-			Code:        fileCode.Code,
-			Text:        fileCode.Text,
-			FileName:    fileCode.UUIDFileName,
-			FileSize:    fmt.Sprintf("%d", fileCode.Size),
-			Url:         fmt.Sprintf("/download/%s", fileCode.Code),
-			HasPassword: fileCode.RequireAuth,
-			// ExpireTime:  fileCode.ExpiredAt.Format("2006-01-02 15:04:05"),
-		},
+	data := map[string]interface{}{
+		"code":         fileCode.Code,
+		"has_password": fileCode.RequireAuth,
+		"expire_time":  formatExpireTime(fileCode.ExpiredAt),
 	}
 
-	c.JSON(consts.StatusOK, resp)
+	if isTextShare(fileCode) {
+		data["text"] = fileCode.Text
+		data["upload_type"] = "text"
+	} else {
+		fileName := displayFileName(fileCode)
+		data["name"] = fileName
+		data["file_name"] = fileName
+		data["size"] = fileCode.Size
+		data["file_size"] = fileCode.Size
+		data["upload_type"] = "file"
+		data["url"] = fmt.Sprintf("/share/download?code=%s", fileCode.Code)
+	}
+
+	c.JSON(consts.StatusOK, map[string]interface{}{
+		"code":    200,
+		"message": "获取成功",
+		"data":    data,
+	})
 }
 
 // DownloadFile 下载分享文件
@@ -465,9 +579,10 @@ func DownloadFile(ctx context.Context, c *app.RequestContext) {
 		// 记录错误但不阻止下载
 		fmt.Printf("更新下载次数失败: %v\n", err)
 	}
+	recordTransferLog(ctx, c, "download", fileCode)
 
 	// 如果是文本分享，直接返回文本
-	if fileCode.Text != "" {
+	if isTextShare(fileCode) {
 		c.Header("Content-Type", "text/plain; charset=utf-8")
 		c.Header("Content-Disposition", `inline; filename="text.txt"`)
 		c.SetBodyString(fileCode.Text)
@@ -496,10 +611,9 @@ func DownloadFile(ctx context.Context, c *app.RequestContext) {
 	defer reader.Close()
 
 	// 设置文件下载头
-	fileName := fileCode.UUIDFileName
+	fileName := displayFileName(fileCode)
 	if fileName == "" {
-		// 向后兼容：如果UUIDFileName为空，则使用Prefix + Suffix
-		fileName = fileCode.Prefix + fileCode.Suffix
+		fileName = fileCode.Code
 	}
 	c.Header("Content-Type", "application/octet-stream")
 	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, fileName))

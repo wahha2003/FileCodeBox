@@ -32,12 +32,14 @@ instance.interceptors.response.use(
     return response.data
   },
   (error) => {
+    const requestUrl = error.config?.url || ''
     if (error.response) {
       switch (error.response.status) {
         case 401:
           ElMessage.error('未授权，请重新登录')
           localStorage.removeItem('token')
-          window.location.href = '/user/login'
+          localStorage.removeItem('userRole')
+          window.location.href = requestUrl.startsWith('/admin') ? '/admin/login' : '/user/login'
           break
         case 403:
           ElMessage.error('拒绝访问')
