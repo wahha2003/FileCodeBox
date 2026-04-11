@@ -267,6 +267,62 @@ export const adminApi = {
     })
   },
 
+  // 更新存储配置
+  updateStorageConfig: (data: {
+    type: string
+    config: {
+      storage_path?: string
+      s3?: {
+        access_key_id?: string
+        secret_access_key?: string
+        bucket_name?: string
+        endpoint_url?: string
+        region_name?: string
+        hostname?: string
+        proxy?: string
+      }
+      qiniu?: {
+        access_key?: string
+        secret_key?: string
+        bucket?: string
+        domain?: string
+        region?: string
+        use_https?: boolean
+        private?: boolean
+      }
+      upyun?: {
+        bucket?: string
+        operator?: string
+        password?: string
+        domain?: string
+        secret?: string
+      }
+    }
+  }) => {
+    return request<ApiResponse<void>>({
+      url: '/admin/storage/config',
+      method: 'PUT',
+      data,
+    })
+  },
+
+  // 测试存储连接
+  testStorageConnection: (type: string) => {
+    return request<ApiResponse<any>>({
+      url: `/admin/storage/test/${type}`,
+      method: 'GET',
+    })
+  },
+
+  // 切换存储类型
+  switchStorage: (type: string) => {
+    return request<ApiResponse<any>>({
+      url: '/admin/storage/switch',
+      method: 'POST',
+      data: { type },
+    })
+  },
+
   // 清理过期文件
   cleanExpiredFiles: () => {
     return request<ApiResponse<{ deleted_count: number }>>({

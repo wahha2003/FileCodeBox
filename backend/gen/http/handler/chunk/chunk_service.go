@@ -18,21 +18,19 @@ import (
 	chunkmodel "github.com/zy84338719/fileCodeBox/backend/gen/http/model/chunk"
 	chunkService "github.com/zy84338719/fileCodeBox/backend/internal/app/chunk"
 	shareService "github.com/zy84338719/fileCodeBox/backend/internal/app/share"
-	"github.com/zy84338719/fileCodeBox/backend/internal/pkg/httpurl"
 	userService "github.com/zy84338719/fileCodeBox/backend/internal/app/user"
+	"github.com/zy84338719/fileCodeBox/backend/internal/conf"
+	"github.com/zy84338719/fileCodeBox/backend/internal/pkg/httpurl"
 	"github.com/zy84338719/fileCodeBox/backend/internal/pkg/utils"
 	"github.com/zy84338719/fileCodeBox/backend/internal/storage"
 )
 
 var chunkSvc *chunkService.Service
-var shareSvc *shareService.Service
-var storageSvc storage.StorageInterface
 var userSvc = userService.NewService()
 
 // 配置常量（应从配置读取，这里使用默认值）
 const (
-	defaultStoragePath = "./data"
-	defaultBaseURL     = "http://localhost:12345"
+	defaultBaseURL = "http://localhost:12345"
 )
 
 func getChunkService() *chunkService.Service {
@@ -43,21 +41,17 @@ func getChunkService() *chunkService.Service {
 }
 
 func getStorageService() storage.StorageInterface {
-	if storageSvc == nil {
-		storageSvc = storage.NewStorageService(&storage.StorageConfig{
-			Type:     storage.StorageTypeLocal,
-			DataPath: defaultStoragePath,
-			BaseURL:  defaultBaseURL,
-		})
-	}
-	return storageSvc
+	return storage.NewConfiguredStorage(conf.GetGlobalConfig(), defaultBaseURL)
 }
 
 func getShareService() *shareService.Service {
-	if shareSvc == nil {
-		shareSvc = shareService.NewService(defaultBaseURL, getStorageService())
-		shareSvc.SetUserService(userSvc)
+	baseURL := defaultBaseURL
+	if cfg := conf.GetGlobalConfig(); cfg != nil && cfg.Server.BaseURL != "" {
+		baseURL = cfg.Server.BaseURL
 	}
+
+	shareSvc := shareService.NewService(baseURL, getStorageService())
+	shareSvc.SetUserService(userSvc)
 	return shareSvc
 }
 
@@ -142,18 +136,59 @@ func ChunkUploadInit(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 
-	resp := &chunkmodel.ChunkUploadInitResp{
-		Code:    200,
-		Message: "初始化成功",
-		Data: &chunkmodel.ChunkUploadInitData{
-			UploadId:      result.UploadID,
-			ChunkSize:     fmt.Sprintf("%d", result.ChunkSize),
-			TotalChunks:   fmt.Sprintf("%d", result.TotalChunks),
-			IsQuickUpload: false,
-		},
+	// 检查存储是否支持直传
+	storageService := getStorageService()
+	respData := map[string]interface{}{
+		"upload_id":       result.UploadID,
+		"chunk_size":      fmt.Sprintf("%d", result.ChunkSize),
+		"total_chunks":    fmt.Sprintf("%d", result.TotalChunks),
+		"is_quick_upload": false,
+		"direct_upload":   false,
 	}
 
-	c.JSON(consts.StatusOK, resp)
+	if directUploader, ok := storageService.(storage.DirectUploader); ok && directUploader.SupportsDirectUpload() {
+		// 生成文件存储路径
+		now := time.Now()
+		fileExt := filepath.Ext(req.FileName)
+		uuidFileName := uuid.New().String() + fileExt
+		objectKey := filepath.Join("uploads", now.Format("2006"), now.Format("01"), now.Format("02"), uuidFileName)
+		objectKey = filepath.ToSlash(objectKey) // 统一使用 / 分隔符
+
+		// 初始化平台侧分片上传
+		platformUploadID, initErr := directUploader.InitiateMultipartUpload(ctx, objectKey)
+		if initErr != nil {
+			c.JSON(consts.StatusInternalServerError, map[string]interface{}{
+				"code":    500,
+				"message": "初始化直传失败: " + initErr.Error(),
+			})
+			return
+		}
+
+		respData["direct_upload"] = true
+		respData["upload_mode"] = directUploader.DirectUploadMode()
+		respData["platform_upload_id"] = platformUploadID
+		respData["object_key"] = objectKey
+
+		// presigned 模式：批量生成预签名 URL
+		if directUploader.DirectUploadMode() == storage.DirectUploadModePresigned {
+			presignedURLs, urlErr := directUploader.GenerateUploadPartURLs(ctx, objectKey, platformUploadID, int(req.TotalChunks))
+			if urlErr != nil {
+				c.JSON(consts.StatusInternalServerError, map[string]interface{}{
+					"code":    500,
+					"message": "生成预签名 URL 失败: " + urlErr.Error(),
+				})
+				return
+			}
+			respData["presigned_urls"] = presignedURLs
+		}
+		// sign_proxy 模式：不需要批量生成，前端每片单独请求签名
+	}
+
+	c.JSON(consts.StatusOK, map[string]interface{}{
+		"code":    200,
+		"message": "初始化成功",
+		"data":    respData,
+	})
 }
 
 // ChunkUpload .
@@ -182,12 +217,43 @@ func ChunkUpload(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 
-	// 获取上传的文件
+	// 检查是否为直传模式（通过 JSON body 提交 ETag，而非 multipart 文件）
+	etag := string(c.FormValue("etag"))
+	if etag != "" {
+		// 直传模式：客户端已直接上传到存储后端，这里只记录 ETag
+		uploadReq := &chunkService.UploadChunkReq{
+			UploadID:   uploadID,
+			ChunkIndex: chunkIndex,
+			ChunkHash:  etag,
+			ChunkSize:  0, // 直传模式下服务端不知道分片大小
+		}
+
+		result, uploadErr := getChunkService().UploadChunk(ctx, uploadReq)
+		if uploadErr != nil {
+			c.JSON(consts.StatusInternalServerError, map[string]interface{}{
+				"code":    500,
+				"message": "记录分片信息失败: " + uploadErr.Error(),
+			})
+			return
+		}
+
+		c.JSON(consts.StatusOK, map[string]interface{}{
+			"code":    200,
+			"message": "分片上报成功",
+			"data": map[string]interface{}{
+				"chunk_index": result.ChunkIndex,
+				"chunk_hash":  result.ChunkHash,
+			},
+		})
+		return
+	}
+
+	// 本地模式：接收文件数据
 	file, err := c.FormFile("chunk")
 	if err != nil {
 		c.JSON(consts.StatusBadRequest, map[string]interface{}{
 			"code":    400,
-			"message": "请上传分片文件",
+			"message": "请上传分片文件或提供 etag",
 		})
 		return
 	}
@@ -382,7 +448,7 @@ func ChunkUploadComplete(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 
-	// 合并分片
+	// 生成文件存储路径
 	now := time.Now()
 	fileExt := filepath.Ext(info.FileName)
 	uuidFileName := uuid.New().String() + fileExt
@@ -395,13 +461,53 @@ func ChunkUploadComplete(ctx context.Context, c *app.RequestContext) {
 		uuidFileName,
 	)
 
-	err = getStorageService().MergeChunks(ctx, uploadID, info.TotalChunks, relativePath)
-	if err != nil {
-		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
-			"code":    500,
-			"message": "合并分片失败: " + err.Error(),
-		})
-		return
+	// 检查是否为直传模式
+	storageService := getStorageService()
+	platformUploadID := string(c.FormValue("platform_upload_id"))
+	objectKey := string(c.FormValue("object_key"))
+
+	if platformUploadID != "" && objectKey != "" {
+		// 直传模式：调用存储后端的 CompleteMultipartUpload
+		if directUploader, ok := storageService.(storage.DirectUploader); ok {
+			// 收集已完成分片的 ETag
+			var parts []storage.CompletedPart
+			for i := 0; i < info.TotalChunks; i++ {
+				// 从 chunk service 获取每个分片的 hash（即 ETag）
+				chunkInfo, chunkErr := getChunkService().GetChunkInfo(ctx, uploadID, i)
+				if chunkErr != nil {
+					c.JSON(consts.StatusInternalServerError, map[string]interface{}{
+						"code":    500,
+						"message": fmt.Sprintf("获取分片 %d 信息失败: %v", i, chunkErr),
+					})
+					return
+				}
+				parts = append(parts, storage.CompletedPart{
+					PartNumber: i + 1, // S3 part number 从 1 开始
+					ETag:       chunkInfo.ChunkHash,
+				})
+			}
+
+			err = directUploader.CompleteMultipartUpload(ctx, objectKey, platformUploadID, parts)
+			if err != nil {
+				c.JSON(consts.StatusInternalServerError, map[string]interface{}{
+					"code":    500,
+					"message": "完成直传分片合并失败: " + err.Error(),
+				})
+				return
+			}
+			// 直传模式使用 objectKey 作为 relativePath
+			relativePath = objectKey
+		}
+	} else {
+		// 本地/服务端模式：合并分片
+		err = storageService.MergeChunks(ctx, uploadID, info.TotalChunks, relativePath)
+		if err != nil {
+			c.JSON(consts.StatusInternalServerError, map[string]interface{}{
+				"code":    500,
+				"message": "合并分片失败: " + err.Error(),
+			})
+			return
+		}
 	}
 
 	// 计算过期时间
@@ -488,14 +594,27 @@ func ChunkUploadCancel(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 
-	// 删除分片存储
-	err := getStorageService().CleanChunks(ctx, uploadID)
-	if err != nil {
-		fmt.Printf("清理分片文件失败: %v\n", err)
+	// 检查是否为直传模式
+	storageService := getStorageService()
+	platformUploadID := string(c.FormValue("platform_upload_id"))
+	objectKey := string(c.FormValue("object_key"))
+
+	if platformUploadID != "" && objectKey != "" {
+		// 直传模式：取消平台侧分片上传
+		if directUploader, ok := storageService.(storage.DirectUploader); ok {
+			if abortErr := directUploader.AbortMultipartUpload(ctx, objectKey, platformUploadID); abortErr != nil {
+				fmt.Printf("取消直传分片失败: %v\n", abortErr)
+			}
+		}
+	} else {
+		// 本地模式：删除分片存储
+		if cleanErr := storageService.CleanChunks(ctx, uploadID); cleanErr != nil {
+			fmt.Printf("清理分片文件失败: %v\n", cleanErr)
+		}
 	}
 
 	// 删除上传记录
-	err = getChunkService().DeleteUpload(ctx, uploadID)
+	err := getChunkService().DeleteUpload(ctx, uploadID)
 	if err != nil {
 		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
 			"code":    500,
@@ -510,4 +629,72 @@ func ChunkUploadCancel(ctx context.Context, c *app.RequestContext) {
 	}
 
 	c.JSON(consts.StatusOK, resp)
+}
+
+// ChunkUploadSign 签名代理接口（sign_proxy 模式专用，又拍云等）
+// @router /chunk/upload/sign/:upload_id/:chunk_index [POST]
+func ChunkUploadSign(ctx context.Context, c *app.RequestContext) {
+	uploadID := c.Param("upload_id")
+	chunkIndexStr := c.Param("chunk_index")
+
+	if uploadID == "" {
+		c.JSON(consts.StatusBadRequest, map[string]interface{}{
+			"code":    400,
+			"message": "上传ID不能为空",
+		})
+		return
+	}
+
+	chunkIndex, err := strconv.Atoi(chunkIndexStr)
+	if err != nil {
+		c.JSON(consts.StatusBadRequest, map[string]interface{}{
+			"code":    400,
+			"message": "分片索引格式错误",
+		})
+		return
+	}
+
+	// 从请求中获取平台参数
+	platformUploadID := string(c.FormValue("platform_upload_id"))
+	objectKey := string(c.FormValue("object_key"))
+	totalChunksStr := string(c.FormValue("total_chunks"))
+
+	if platformUploadID == "" || objectKey == "" {
+		c.JSON(consts.StatusBadRequest, map[string]interface{}{
+			"code":    400,
+			"message": "platform_upload_id 和 object_key 不能为空",
+		})
+		return
+	}
+
+	totalChunks, _ := strconv.Atoi(totalChunksStr)
+	if totalChunks <= 0 {
+		totalChunks = 1
+	}
+
+	// 获取存储服务并生成签名
+	storageService := getStorageService()
+	directUploader, ok := storageService.(storage.DirectUploader)
+	if !ok || !directUploader.SupportsDirectUpload() {
+		c.JSON(consts.StatusBadRequest, map[string]interface{}{
+			"code":    400,
+			"message": "当前存储不支持直传",
+		})
+		return
+	}
+
+	authInfo, err := directUploader.GenerateUploadPartAuth(ctx, objectKey, platformUploadID, chunkIndex, totalChunks)
+	if err != nil {
+		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
+			"code":    500,
+			"message": "生成分片签名失败: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(consts.StatusOK, map[string]interface{}{
+		"code":    200,
+		"message": "签名生成成功",
+		"data":    authInfo,
+	})
 }

@@ -28,8 +28,6 @@ import (
 	"github.com/zy84338719/fileCodeBox/backend/internal/storage"
 )
 
-var shareSvc *shareService.Service
-var storageSvc storage.StorageInterface
 var userSvc = userService.NewService()
 var transferLogRepo = dao.NewTransferLogRepository()
 
@@ -41,25 +39,17 @@ const (
 )
 
 func getStorageService() storage.StorageInterface {
-	if storageSvc == nil {
-		dataPath := "./data"
-		if cfg := conf.GetGlobalConfig(); cfg != nil && cfg.App.DataPath != "" {
-			dataPath = cfg.App.DataPath
-		}
-		storageSvc = storage.NewStorageService(&storage.StorageConfig{
-			Type:     storage.StorageTypeLocal,
-			DataPath: dataPath,
-			BaseURL:  defaultBaseURL,
-		})
-	}
-	return storageSvc
+	return storage.NewConfiguredStorage(conf.GetGlobalConfig(), defaultBaseURL)
 }
 
 func getShareService() *shareService.Service {
-	if shareSvc == nil {
-		shareSvc = shareService.NewService(defaultBaseURL, getStorageService())
-		shareSvc.SetUserService(userSvc)
+	baseURL := defaultBaseURL
+	if cfg := conf.GetGlobalConfig(); cfg != nil && strings.TrimSpace(cfg.Server.BaseURL) != "" {
+		baseURL = strings.TrimSpace(cfg.Server.BaseURL)
 	}
+
+	shareSvc := shareService.NewService(baseURL, getStorageService())
+	shareSvc.SetUserService(userSvc)
 	return shareSvc
 }
 

@@ -39,9 +39,9 @@ upload:
   open_upload: true
   upload_size: 10485760      # 10MB
   enable_chunk: true
-  chunk_size: 2097152       # 2MB
+  chunk_size: 5242880        # 5MB（S3 分片上传最小要求）
   share_code_length: 4      # 分享码长度
-  share_code_charset: "0123456789"  # 分享码字符集，可改为 "AB0123456789"
+  share_code_charset: "0123456789"  # 分享码字符集
   max_save_seconds: 0      # 0 表示永不过期
   require_login: false
 
@@ -54,12 +54,31 @@ download:
 
 # 存储配置
 storage:
-  type: "local"              # local, s3, webdav, onedrive, nfs
+  type: "local"              # local, s3, qiniu, upyun
   storage_path: "./data/uploads"
-  # s3: null
-  # webdav: null
-  # onedrive: null
-  # nfs: null
+  s3:
+    access_key_id: ""
+    secret_access_key: ""
+    bucket_name: ""
+    endpoint_url: ""
+    region_name: "us-east-1"
+    hostname: ""
+    proxy: ""
+    signed_url_expiry: 3600  # 预签名 URL 有效期（秒）
+  qiniu:
+    access_key: ""
+    secret_key: ""
+    bucket: ""
+    domain: ""               # CDN 域名
+    region: ""               # 区域: z0/z1/z2/na0/as0/cn-east-2
+    use_https: true
+    private: false           # 是否私有空间
+  upyun:
+    bucket: ""               # 服务名
+    operator: ""             # 操作员
+    password: ""             # 操作密码
+    domain: ""               # CDN 域名
+    secret: ""               # Token 防盗链密钥
 
 # 用户配置
 user:

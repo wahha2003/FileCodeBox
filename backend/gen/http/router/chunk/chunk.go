@@ -44,6 +44,13 @@ func Register(r *server.Hertz) {
 				_status := _upload.Group("/status", _statusMw()...)
 				_status.GET("/:upload_id", append(_chunkuploadstatusMw(), chunk.ChunkUploadStatus)...)
 			}
+			{
+				_sign := _upload.Group("/sign", _signMw()...)
+				{
+					_sign_upload_id := _sign.Group("/:upload_id", _signUploadIdMw()...)
+					_sign_upload_id.POST("/:chunk_index", append(_chunkuploadsignMw(), chunk.ChunkUploadSign)...)
+				}
+			}
 		}
 	}
 }

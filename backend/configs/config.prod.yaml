@@ -61,7 +61,14 @@ download:
 storage:
   type: "local"              # local, s3, webdav, onedrive, nfs
   storage_path: "/app/data/uploads"
-  # s3: null
+  s3:
+    access_key_id: ""
+    secret_access_key: ""
+    bucket_name: ""
+    endpoint_url: ""
+    region_name: "us-east-1"
+    hostname: ""
+    proxy: ""
   # webdav: null
   # onedrive: null
   # nfs: null

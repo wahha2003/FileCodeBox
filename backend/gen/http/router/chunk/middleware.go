@@ -75,3 +75,18 @@ func _chunkuploadstatusMw() []app.HandlerFunc {
 	// your code...
 	return nil
 }
+
+func _signMw() []app.HandlerFunc {
+	// your code...
+	return nil
+}
+
+func _signUploadIdMw() []app.HandlerFunc {
+	// your code...
+	return nil
+}
+
+func _chunkuploadsignMw() []app.HandlerFunc {
+	// your code...
+	return nil
+}

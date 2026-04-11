@@ -1,5 +1,7 @@
 # 编译后的二进制文件
 filecodebox
+backend/server
+backend/server.exe
 *.exe
 *.exe~
 *.dll
@@ -17,9 +19,15 @@ go.work
 
 # 数据目录（包含数据库等）
 data/
+backend/data/
+
+# 静态资源（前端构建产物）
+backend/static/
+frontend/dist/
 
 # 日志文件
 *.log
+backend/*.log
 
 # 临时文件
 *.tmp
@@ -50,7 +58,12 @@ tests/*.tmp
 
 # 配置文件（如果包含敏感信息）
 config.json
+.env
+.env.local
+.env.*.local
 
 # 上传临时文件
 uploads/
 temp/
+node_modules/
+

@@ -505,14 +505,6 @@ func deletePhysicalFile(ctx context.Context, file *dbmodel.FileCode) {
 		return
 	}
 
-	dataPath := "./data"
-	if cfg := conf.GetGlobalConfig(); cfg != nil && cfg.App.DataPath != "" {
-		dataPath = cfg.App.DataPath
-	}
-
-	storageService := storage.NewStorageService(&storage.StorageConfig{
-		Type:     storage.StorageTypeLocal,
-		DataPath: dataPath,
-	})
+	storageService := storage.NewConfiguredStorage(conf.GetGlobalConfig(), "")
 	_ = storageService.DeleteFile(ctx, file.GetFilePath())
 }

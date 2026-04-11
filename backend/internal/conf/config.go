@@ -124,8 +124,42 @@ type DownloadConfig struct {
 
 // StorageConfig 存储配置
 type StorageConfig struct {
-	Type        string `mapstructure:"type"`
-	StoragePath string `mapstructure:"storage_path"`
+	Type        string      `mapstructure:"type"`
+	StoragePath string      `mapstructure:"storage_path"`
+	S3          S3Config    `mapstructure:"s3"`
+	Qiniu       QiniuConfig `mapstructure:"qiniu"`
+	Upyun       UpyunConfig `mapstructure:"upyun"`
+}
+
+type S3Config struct {
+	AccessKeyID     string `mapstructure:"access_key_id"`
+	SecretAccessKey  string `mapstructure:"secret_access_key"`
+	BucketName       string `mapstructure:"bucket_name"`
+	EndpointURL      string `mapstructure:"endpoint_url"`
+	RegionName       string `mapstructure:"region_name"`
+	Hostname         string `mapstructure:"hostname"`
+	Proxy            string `mapstructure:"proxy"`
+	SignedURLExpiry  int    `mapstructure:"signed_url_expiry"` // 预签名 URL 有效期（秒），默认 3600
+}
+
+// QiniuConfig 七牛云配置
+type QiniuConfig struct {
+	AccessKey string `mapstructure:"access_key"`
+	SecretKey string `mapstructure:"secret_key"`
+	Bucket    string `mapstructure:"bucket"`
+	Domain    string `mapstructure:"domain"`    // CDN 域名
+	Region    string `mapstructure:"region"`    // 区域: z0/z1/z2/na0/as0/cn-east-2
+	UseHTTPS  bool   `mapstructure:"use_https"`
+	Private   bool   `mapstructure:"private"`   // 是否私有空间
+}
+
+// UpyunConfig 又拍云配置
+type UpyunConfig struct {
+	Bucket   string `mapstructure:"bucket"`   // 服务名
+	Operator string `mapstructure:"operator"` // 操作员
+	Password string `mapstructure:"password"` // 操作密码
+	Domain   string `mapstructure:"domain"`   // CDN 域名
+	Secret   string `mapstructure:"secret"`   // Token 防盗链密钥
 }
 
 func NormalizeShareCodeLength(length int) int {

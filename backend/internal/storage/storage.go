@@ -20,6 +20,14 @@ const (
 	StorageTypeS3       StorageType = "s3"
 	StorageTypeWebDAV   StorageType = "webdav"
 	StorageTypeOneDrive StorageType = "onedrive"
+	StorageTypeQiniu    StorageType = "qiniu"
+	StorageTypeUpyun    StorageType = "upyun"
+)
+
+// 直传模式常量
+const (
+	DirectUploadModePresigned = "presigned"  // S3/七牛：批量预签名 URL
+	DirectUploadModeSignProxy = "sign_proxy" // 又拍云：每片请求签名
 )
 
 // FileOperationResult 文件操作结果
@@ -55,6 +63,63 @@ type StorageInterface interface {
 	GetFileReader(ctx context.Context, filePath string) (io.ReadCloser, int64, error)
 }
 
+// DirectUploader 直传接口（可选，S3/七牛/又拍实现此接口）
+// 支持两种模式：
+//   - "presigned"（S3/七牛）：初始化时批量返回预签名 URL，客户端直接 PUT
+//   - "sign_proxy"（又拍）：每个分片上传前请求服务端签名，客户端携带签名 PUT
+type DirectUploader interface {
+	// InitiateMultipartUpload 初始化分片上传，返回平台侧上传ID
+	InitiateMultipartUpload(ctx context.Context, objectKey string) (platformUploadID string, err error)
+
+	// GenerateUploadPartURLs 批量生成分片上传预签名 URL（presigned 模式使用）
+	GenerateUploadPartURLs(ctx context.Context, objectKey, platformUploadID string, totalParts int) ([]PresignedPart, error)
+
+	// GenerateUploadPartAuth 为单个分片生成签名认证信息（sign_proxy 模式使用）
+	GenerateUploadPartAuth(ctx context.Context, objectKey, platformUploadID string, partIndex, partCount int) (*PartAuthInfo, error)
+
+	// CompleteMultipartUpload 完成分片上传（合并分片）
+	CompleteMultipartUpload(ctx context.Context, objectKey, platformUploadID string, parts []CompletedPart) error
+
+	// AbortMultipartUpload 取消分片上传
+	AbortMultipartUpload(ctx context.Context, objectKey, platformUploadID string) error
+
+	// GeneratePresignedPutURL 生成单次上传预签名 URL（小文件直传）
+	GeneratePresignedPutURL(ctx context.Context, objectKey, contentType string) (string, error)
+
+	// GeneratePresignedGetURL 生成预签名下载 URL
+	GeneratePresignedGetURL(ctx context.Context, objectKey string) (string, error)
+
+	// SupportsDirectUpload 是否支持直传
+	SupportsDirectUpload() bool
+
+	// DirectUploadMode 直传模式："presigned" 或 "sign_proxy"
+	DirectUploadMode() string
+}
+
+// PresignedPart 预签名分片信息（presigned 模式）
+type PresignedPart struct {
+	PartNumber int    `json:"part_number"`
+	URL        string `json:"url"`
+}
+
+// PartAuthInfo 签名代理模式的分片认证信息（sign_proxy 模式，又拍云使用）
+type PartAuthInfo struct {
+	URL     string            `json:"url"`     // 上传目标 URL
+	Headers map[string]string `json:"headers"` // 客户端需要携带的请求头
+	Method  string            `json:"method"`  // HTTP 方法（PUT）
+}
+
+// CompletedPart 已完成的分片信息
+type CompletedPart struct {
+	PartNumber int    `json:"part_number"`
+	ETag       string `json:"etag"`
+}
+
+// ConnectionTester 可选的连接测试接口
+type ConnectionTester interface {
+	TestConnection(ctx context.Context) error
+}
+
 // StorageConfig 存储配置
 type StorageConfig struct {
 	Type     StorageType
@@ -62,16 +127,35 @@ type StorageConfig struct {
 	BaseURL  string // 基础URL
 
 	// S3 配置
-	Endpoint  string
-	AccessKey string
-	SecretKey string
-	Bucket    string
-	Region    string
+	Endpoint       string
+	AccessKey      string
+	SecretKey      string
+	Bucket         string
+	Region         string
+	Hostname       string
+	Proxy          string
+	SignedURLExpiry int // 预签名 URL 有效期（秒），默认 3600
 
 	// WebDAV 配置
 	WebDAVURL      string
 	WebDAVUsername string
 	WebDAVPassword string
+
+	// 七牛云配置
+	QiniuAccessKey string
+	QiniuSecretKey string
+	QiniuBucket    string
+	QiniuDomain    string // CDN 域名
+	QiniuRegion    string // 存储区域
+	QiniuUseHTTPS  bool
+	QiniuPrivate   bool // 是否私有空间
+
+	// 又拍云配置
+	UpyunBucket   string // 服务名
+	UpyunOperator string // 操作员
+	UpyunPassword string // 操作密码
+	UpyunDomain   string // CDN 域名
+	UpyunSecret   string // Token 防盗链密钥
 }
 
 // StorageService 存储服务

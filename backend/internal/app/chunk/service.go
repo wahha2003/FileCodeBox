@@ -249,6 +249,23 @@ func (s *Service) GetUploadInfo(ctx context.Context, uploadID string) (*model.Up
 	return s.chunkRepo.GetByUploadID(ctx, uploadID)
 }
 
+// GetChunkInfo 获取单个分片信息（用于直传模式下收集 ETag）
+func (s *Service) GetChunkInfo(ctx context.Context, uploadID string, chunkIndex int) (*ChunkResp, error) {
+	chunk, err := s.chunkRepo.GetChunkByIndex(ctx, uploadID, chunkIndex)
+	if err != nil {
+		return nil, fmt.Errorf("分片 %d 未找到: %w", chunkIndex, err)
+	}
+	return &ChunkResp{
+		ID:         chunk.Model.ID,
+		UploadID:   chunk.UploadID,
+		ChunkIndex: chunk.ChunkIndex,
+		ChunkHash:  chunk.ChunkHash,
+		ChunkSize:  chunk.ChunkSize,
+		Completed:  chunk.Completed,
+		Status:     chunk.Status,
+	}, nil
+}
+
 // CheckQuickUpload 检查是否可以快速上传（通过文件哈希查找已存在的上传）
 // 如果找到相同的文件哈希和文件大小，返回对应的分享代码
 func (s *Service) CheckQuickUpload(ctx context.Context, fileHash string, fileSize int64) (string, error) {

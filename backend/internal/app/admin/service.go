@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"runtime"
+	"strings"
 	"time"
 
+	"github.com/zy84338719/fileCodeBox/backend/internal/conf"
 	"github.com/zy84338719/fileCodeBox/backend/internal/pkg/auth"
 	"github.com/zy84338719/fileCodeBox/backend/internal/repo/db/dao"
 	"github.com/zy84338719/fileCodeBox/backend/internal/repo/db/model"
@@ -405,10 +407,16 @@ func (s *Service) GetStorageStatus(ctx context.Context) (*StorageStatus, error) 
 		return nil, err
 	}
 
-	// 简化实现，假设使用本地存储
 	storageType := "local"
-	totalSpace := int64(100 * 1024 * 1024 * 1024) // 100GB 默认
+	totalSpace := int64(100 * 1024 * 1024 * 1024) // 默认本地存储显示值
 	freeSpace := totalSpace - totalSize
+	if cfg := conf.GetGlobalConfig(); cfg != nil && strings.TrimSpace(cfg.Storage.Type) != "" {
+		storageType = strings.ToLower(strings.TrimSpace(cfg.Storage.Type))
+	}
+	if storageType == "s3" {
+		totalSpace = 0
+		freeSpace = 0
+	}
 	usagePercent := float64(0)
 	if totalSpace > 0 {
 		usagePercent = (float64(totalSize) / float64(totalSpace)) * 100
