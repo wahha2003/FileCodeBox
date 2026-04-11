@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 
@@ -15,10 +16,19 @@ import (
 	"github.com/zy84338719/fileCodeBox/backend/internal/repo/db"
 	"github.com/zy84338719/fileCodeBox/backend/internal/repo/db/model"
 	"go.uber.org/zap"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
 type Config = conf.AppConfiguration
+
+const (
+	defaultAdminUsername           = "admin"
+	defaultAdminPassword           = "admin123"
+	defaultAdminEmail              = "admin@filecodebox.local"
+	defaultAdminNickname           = "Administrator"
+	legacyDefaultAdminPasswordHash = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZRGdjGj/n3.rsQ5pPjZ5yVlWK5WAe"
+)
 
 func CORS() app.HandlerFunc {
 	return func(ctx context.Context, c *app.RequestContext) {
@@ -64,6 +74,8 @@ func InitConfig(configPath string) (*Config, error) {
 	v.SetDefault("user.allow_user_registration", true)
 	v.SetDefault("user.require_email_verify", false)
 	v.SetDefault("user.jwt_secret", "FileCodeBox2025JWT")
+	v.SetDefault("upload.share_code_length", conf.DefaultShareCodeLength)
+	v.SetDefault("upload.share_code_charset", conf.DefaultShareCodeCharset)
 
 	if err := v.ReadInConfig(); err != nil {
 		log.Printf("Warning: Failed to read config file: %v, using defaults", err)
@@ -109,19 +121,35 @@ func InitDatabase(config *conf.DatabaseConfig) (*gorm.DB, error) {
 }
 
 func CreateDefaultAdmin(database *gorm.DB) error {
+	var existingAdmin model.User
+	err := database.Where("username = ? AND role = ?", defaultAdminUsername, "admin").First(&existingAdmin).Error
+	switch {
+	case err == nil:
+		return repairLegacyDefaultAdmin(database, &existingAdmin)
+	case err != nil && !errors.Is(err, gorm.ErrRecordNotFound):
+		return fmt.Errorf("failed to lookup default admin user: %w", err)
+	}
+
 	var count int64
-	database.Model(&model.User{}).Where("role = ?", "admin").Count(&count)
+	if err := database.Model(&model.User{}).Where("role = ?", "admin").Count(&count).Error; err != nil {
+		return fmt.Errorf("failed to count admin users: %w", err)
+	}
 
 	if count > 0 {
 		log.Println("Admin user already exists")
 		return nil
 	}
 
+	passwordHash, err := generateDefaultAdminPasswordHash()
+	if err != nil {
+		return err
+	}
+
 	admin := &model.User{
-		Username:     "admin",
-		Email:        "admin@filecodebox.local",
-		PasswordHash: "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZRGdjGj/n3.rsQ5pPjZ5yVlWK5WAe", // password: admin123
-		Nickname:     "Administrator",
+		Username:     defaultAdminUsername,
+		Email:        defaultAdminEmail,
+		PasswordHash: passwordHash,
+		Nickname:     defaultAdminNickname,
 		Role:         "admin",
 		Status:       "active",
 	}
@@ -130,7 +158,35 @@ func CreateDefaultAdmin(database *gorm.DB) error {
 		return fmt.Errorf("failed to create admin user: %w", err)
 	}
 
-	log.Println("Default admin user created (username: admin, password: admin123)")
+	log.Printf("Default admin user created (username: %s, password: %s)", defaultAdminUsername, defaultAdminPassword)
+	return nil
+}
+
+func generateDefaultAdminPasswordHash() (string, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(defaultAdminPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return "", fmt.Errorf("failed to hash default admin password: %w", err)
+	}
+
+	return string(hash), nil
+}
+
+func repairLegacyDefaultAdmin(database *gorm.DB, admin *model.User) error {
+	if admin.PasswordHash != legacyDefaultAdminPasswordHash {
+		log.Println("Admin user already exists")
+		return nil
+	}
+
+	passwordHash, err := generateDefaultAdminPasswordHash()
+	if err != nil {
+		return err
+	}
+
+	if err := database.Model(admin).Update("password_hash", passwordHash).Error; err != nil {
+		return fmt.Errorf("failed to repair default admin user password: %w", err)
+	}
+
+	log.Printf("Default admin user password repaired (username: %s, password: %s)", defaultAdminUsername, defaultAdminPassword)
 	return nil
 }
 

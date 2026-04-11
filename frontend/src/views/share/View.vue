@@ -37,6 +37,7 @@
                 type="password"
                 placeholder="请输入访问密码"
                 show-password
+                clearable
                 @keyup.enter="fetchShareWithPassword"
                 style="width: 300px; margin-bottom: 16px;"
               />
@@ -137,6 +138,7 @@ import {
   Box, HomeFilled, Document, Folder, Download, CopyDocument, Loading 
 } from '@element-plus/icons-vue'
 import { shareApi } from '@/api/share'
+import { showAlert } from '@/utils/alert'
 import { buildApiUrl } from '@/utils/origin'
 
 const route = useRoute()
@@ -159,6 +161,7 @@ const formatFileSize = (bytes: number): string => {
 const fetchShare = async (pwd?: string) => {
   loading.value = true
   error.value = ''
+  shareData.value = null
   needPassword.value = false
 
   try {
@@ -168,6 +171,9 @@ const fetchShare = async (pwd?: string) => {
       shareData.value = res.data
     } else if (res.code === 403 || res.data?.has_password) {
       needPassword.value = true
+      if (pwd) {
+        showAlert(res.message || '访问密码错误，请重试', 'error')
+      }
     } else if (res.code === 404) {
       error.value = res.message || '分享不存在或已过期'
     } else {
@@ -182,7 +188,7 @@ const fetchShare = async (pwd?: string) => {
 
 const fetchShareWithPassword = () => {
   if (!password.value.trim()) {
-    ElMessage.warning('请输入访问密码')
+    showAlert('请输入访问密码', 'warning')
     return
   }
   fetchShare(password.value)
@@ -202,10 +208,7 @@ const copyText = async () => {
 const downloadFile = () => {
   if (!shareCode.value) return
   
-  let url = buildApiUrl(`/share/download?code=${encodeURIComponent(shareCode.value)}`)
-  if (password.value) {
-    url += `&password=${encodeURIComponent(password.value)}`
-  }
+  const url = buildApiUrl(`/share/download?code=${encodeURIComponent(shareCode.value)}`)
   window.open(url, '_blank')
 }
 

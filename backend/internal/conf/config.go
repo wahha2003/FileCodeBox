@@ -1,6 +1,16 @@
 package conf
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
+
+const (
+	DefaultShareCodeLength  = 4
+	MaxShareCodeLength      = 32
+	DefaultShareCodeCharset = "0123456789"
+	shareCodeAllowedCharset = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+)
 
 // 全局配置
 var globalConfig *AppConfiguration
@@ -94,12 +104,14 @@ type UserConfig struct {
 
 // UploadConfig 上传配置
 type UploadConfig struct {
-	OpenUpload     bool  `mapstructure:"open_upload"`
-	UploadSize     int64 `mapstructure:"upload_size"`
-	EnableChunk    bool  `mapstructure:"enable_chunk"`
-	ChunkSize      int64 `mapstructure:"chunk_size"`
-	MaxSaveSeconds int   `mapstructure:"max_save_seconds"`
-	RequireLogin   bool  `mapstructure:"require_login"`
+	OpenUpload       bool   `mapstructure:"open_upload"`
+	UploadSize       int64  `mapstructure:"upload_size"`
+	EnableChunk      bool   `mapstructure:"enable_chunk"`
+	ChunkSize        int64  `mapstructure:"chunk_size"`
+	MaxSaveSeconds   int    `mapstructure:"max_save_seconds"`
+	RequireLogin     bool   `mapstructure:"require_login"`
+	ShareCodeLength  int    `mapstructure:"share_code_length"`
+	ShareCodeCharset string `mapstructure:"share_code_charset"`
 }
 
 // DownloadConfig 下载配置
@@ -114,4 +126,64 @@ type DownloadConfig struct {
 type StorageConfig struct {
 	Type        string `mapstructure:"type"`
 	StoragePath string `mapstructure:"storage_path"`
+}
+
+func NormalizeShareCodeLength(length int) int {
+	switch {
+	case length <= 0:
+		return DefaultShareCodeLength
+	case length > MaxShareCodeLength:
+		return MaxShareCodeLength
+	default:
+		return length
+	}
+}
+
+func NormalizeShareCodeCharset(charset string) string {
+	charset = strings.TrimSpace(charset)
+	if charset == "" {
+		return DefaultShareCodeCharset
+	}
+
+	allowed := make(map[rune]struct{}, len(shareCodeAllowedCharset))
+	for _, ch := range shareCodeAllowedCharset {
+		allowed[ch] = struct{}{}
+	}
+
+	seen := make(map[rune]struct{}, len(charset))
+	var builder strings.Builder
+	for _, ch := range charset {
+		if _, ok := allowed[ch]; !ok {
+			continue
+		}
+		if _, ok := seen[ch]; ok {
+			continue
+		}
+		seen[ch] = struct{}{}
+		builder.WriteRune(ch)
+	}
+
+	if builder.Len() == 0 {
+		return DefaultShareCodeCharset
+	}
+
+	return builder.String()
+}
+
+func GetShareCodeConfig(cfg *AppConfiguration) (int, string) {
+	if cfg == nil {
+		return DefaultShareCodeLength, DefaultShareCodeCharset
+	}
+
+	return NormalizeShareCodeLength(cfg.Upload.ShareCodeLength), NormalizeShareCodeCharset(cfg.Upload.ShareCodeCharset)
+}
+
+func IsNumericShareCodeCharset(charset string) bool {
+	charset = NormalizeShareCodeCharset(charset)
+	for _, ch := range charset {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return charset != ""
 }

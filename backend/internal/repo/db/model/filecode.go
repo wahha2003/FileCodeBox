@@ -27,10 +27,11 @@ type FileCode struct {
 	UploadID  string `gorm:"size:36" json:"upload_id"`
 
 	// 新增：用户认证相关字段
-	UserID      *uint  `gorm:"index" json:"user_id"`                           // 上传用户ID，为null表示匿名上传
-	UploadType  string `gorm:"size:20;default:'anonymous'" json:"upload_type"` // anonymous, authenticated
-	RequireAuth bool   `gorm:"default:false" json:"require_auth"`              // 是否需要登录才能下载
-	OwnerIP     string `gorm:"size:45" json:"owner_ip"`                        // 上传者IP地址
+	UserID             *uint  `gorm:"index" json:"user_id"`                           // 上传用户ID，为null表示匿名上传
+	UploadType         string `gorm:"size:20;default:'anonymous'" json:"upload_type"` // anonymous, authenticated
+	RequireAuth        bool   `gorm:"default:false" json:"require_auth"`              // 是否需要访问密码
+	AccessPasswordHash string `gorm:"size:255" json:"-"`                              // 访问密码哈希
+	OwnerIP            string `gorm:"size:45" json:"owner_ip"`                        // 上传者IP地址
 }
 
 // IsExpired 检查是否过期

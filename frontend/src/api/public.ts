@@ -8,6 +8,8 @@ export interface PublicConfig {
   enableChunk: number
   openUpload: number
   expireStyle: string[]
+  shareCodeLength: number
+  shareCodeCharset: string
   initialized?: boolean
 }
 

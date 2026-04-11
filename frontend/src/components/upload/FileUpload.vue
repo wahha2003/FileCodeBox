@@ -82,7 +82,21 @@
           v-model="form.require_auth"
           active-text="需要密码"
           inactive-text="公开访问"
+          @change="handleProtectionChange"
         />
+      </div>
+
+      <div v-if="form.require_auth" class="setting-group">
+        <label class="setting-label">访问密码</label>
+        <el-input
+          v-model="form.password"
+          type="password"
+          placeholder="请设置访问密码"
+          show-password
+          clearable
+          maxlength="64"
+        />
+        <p class="setting-help">访问者打开分享链接后，需要输入这个密码才能查看或下载内容。</p>
       </div>
     </div>
 
@@ -124,7 +138,7 @@ import {
 import type { UploadFile } from 'element-plus'
 
 const emit = defineEmits<{
-  success: [result: { code: string; share_url: string; full_share_url: string; qr_code_data: string }]
+  success: [result: { code: string; share_url: string; full_share_url: string; qr_code_data: string; access_password?: string }]
 }>()
 
 const selectedFile = ref<File | null>(null)
@@ -136,6 +150,7 @@ const form = ref({
   expire_value: 1,
   expire_style: 'day',
   require_auth: false,
+  password: '',
 })
 
 const handleFileChange = (file: UploadFile) => {
@@ -144,6 +159,12 @@ const handleFileChange = (file: UploadFile) => {
 
 const clearFile = () => {
   selectedFile.value = null
+}
+
+const handleProtectionChange = (enabled: string | number | boolean) => {
+  if (!enabled) {
+    form.value.password = ''
+  }
 }
 
 const formatFileSize = (bytes: number) => {
@@ -180,6 +201,11 @@ const handleUpload = async () => {
     return
   }
 
+  if (form.value.require_auth && !form.value.password.trim()) {
+    ElMessage.warning('请先设置访问密码')
+    return
+  }
+
   uploading.value = true
   uploadProgress.value = 0
   uploadStatusText.value = '准备上传...'
@@ -200,11 +226,14 @@ const handleUpload = async () => {
         share_url: res.data.share_url,
         full_share_url: res.data.full_share_url,
         qr_code_data: res.data.qr_code_data,
+        access_password: form.value.require_auth ? form.value.password : undefined,
       })
       
       // 重置
       setTimeout(() => {
         selectedFile.value = null
+        form.value.password = ''
+        form.value.require_auth = false
         uploading.value = false
         uploadProgress.value = 0
       }, 2000)
@@ -360,6 +389,13 @@ const handleUpload = async () => {
 
 .expire-select {
   width: 120px;
+}
+
+.setting-help {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #909399;
 }
 
 .upload-btn {

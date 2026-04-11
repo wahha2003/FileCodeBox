@@ -16,6 +16,11 @@ export const useUserStore = defineStore('user', () => {
       token.value = res.data.token
       userInfo.value = res.data.user
       localStorage.setItem('token', res.data.token)
+      if (res.data.user?.role) {
+        localStorage.setItem('userRole', res.data.user.role)
+      } else {
+        localStorage.removeItem('userRole')
+      }
       return true
     }
     throw new Error(res.message)
@@ -25,6 +30,7 @@ export const useUserStore = defineStore('user', () => {
     token.value = ''
     userInfo.value = null
     localStorage.removeItem('token')
+    localStorage.removeItem('userRole')
   }
 
   const fetchUserInfo = async () => {
@@ -33,6 +39,11 @@ export const useUserStore = defineStore('user', () => {
       const res = await userApi.getUserInfo()
       if (res.code === 200) {
         userInfo.value = res.data
+        if (res.data?.role) {
+          localStorage.setItem('userRole', res.data.role)
+        } else {
+          localStorage.removeItem('userRole')
+        }
       }
     } catch (error) {
       logout()

@@ -39,6 +39,11 @@
           :suffix-icon="CopyDocument"
           @click="copyUrl"
         />
+        <div v-if="sharePassword" class="password-reminder">
+          <p class="password-reminder-label">访问密码</p>
+          <el-input v-model="sharePassword" type="password" readonly show-password />
+          <p class="password-reminder-help">请将链接和访问密码分别告知接收方。</p>
+        </div>
       </div>
       
       <template #footer>
@@ -63,6 +68,7 @@ const route = useRoute()
 const activeTab = ref('upload')
 const showSuccessDialog = ref(false)
 const shareUrl = ref('')
+const sharePassword = ref('')
 const initialCode = ref('')
 
 interface ShareResult {
@@ -70,10 +76,12 @@ interface ShareResult {
   share_url: string
   full_share_url: string
   qr_code_data: string
+  access_password?: string
 }
 
 const handleSuccess = (result: ShareResult) => {
   shareUrl.value = result.full_share_url || buildPublicShareUrl(result.code)
+  sharePassword.value = result.access_password || ''
   showSuccessDialog.value = true
 }
 
@@ -122,6 +130,24 @@ onMounted(() => {
     .el-input {
       margin-top: 20px;
     }
+  }
+
+  .password-reminder {
+    margin-top: 20px;
+    text-align: left;
+  }
+
+  .password-reminder-label {
+    margin: 0 0 8px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #606266;
+  }
+
+  .password-reminder-help {
+    margin: 8px 0 0;
+    font-size: 12px;
+    color: #909399;
   }
 }
 </style>

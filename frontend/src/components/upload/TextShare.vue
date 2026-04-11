@@ -47,7 +47,21 @@
           v-model="form.require_auth"
           active-text="需要密码"
           inactive-text="公开访问"
+          @change="handleProtectionChange"
         />
+      </div>
+
+      <div v-if="form.require_auth" class="setting-group">
+        <label class="setting-label">访问密码</label>
+        <el-input
+          v-model="form.password"
+          type="password"
+          placeholder="请设置访问密码"
+          show-password
+          clearable
+          maxlength="64"
+        />
+        <p class="setting-help">访问者打开分享链接后，需要输入这个密码才能查看内容。</p>
       </div>
     </div>
 
@@ -74,7 +88,7 @@ import { ElMessage } from 'element-plus'
 import { Clock, Lock, Promotion } from '@element-plus/icons-vue'
 
 const emit = defineEmits<{
-  success: [result: { code: string; share_url: string; full_share_url: string; qr_code_data: string }]
+  success: [result: { code: string; share_url: string; full_share_url: string; qr_code_data: string; access_password?: string }]
 }>()
 
 const textContent = ref('')
@@ -84,11 +98,23 @@ const form = ref({
   expire_value: 1,
   expire_style: 'day',
   require_auth: false,
+  password: '',
 })
+
+const handleProtectionChange = (enabled: string | number | boolean) => {
+  if (!enabled) {
+    form.value.password = ''
+  }
+}
 
 const handleShare = async () => {
   if (!textContent.value.trim()) {
     ElMessage.warning('请输入文本内容')
+    return
+  }
+
+  if (form.value.require_auth && !form.value.password.trim()) {
+    ElMessage.warning('请先设置访问密码')
     return
   }
 
@@ -108,10 +134,13 @@ const handleShare = async () => {
         share_url: res.data.share_url,
         full_share_url: res.data.full_share_url,
         qr_code_data: res.data.qr_code_data,
+        access_password: form.value.require_auth ? form.value.password : undefined,
       })
       
       // 重置
       textContent.value = ''
+      form.value.password = ''
+      form.value.require_auth = false
     } else {
       throw new Error(res.message || '分享失败')
     }
@@ -178,6 +207,13 @@ const handleShare = async () => {
 
 .expire-select {
   width: 120px;
+}
+
+.setting-help {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #909399;
 }
 
 .share-btn {

@@ -40,6 +40,8 @@ upload:
   upload_size: 10485760      # 10MB
   enable_chunk: true
   chunk_size: 2097152       # 2MB
+  share_code_length: 4      # 分享码长度
+  share_code_charset: "0123456789"  # 分享码字符集，可改为 "AB0123456789"
   max_save_seconds: 0      # 0 表示永不过期
   require_login: false
 

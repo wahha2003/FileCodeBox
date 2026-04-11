@@ -10,12 +10,14 @@ import (
 )
 
 type publicConfigData struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	UploadSize  int64    `json:"uploadSize"`
-	EnableChunk int      `json:"enableChunk"`
-	OpenUpload  int      `json:"openUpload"`
-	ExpireStyle []string `json:"expireStyle"`
+	Name             string   `json:"name"`
+	Description      string   `json:"description"`
+	UploadSize       int64    `json:"uploadSize"`
+	EnableChunk      int      `json:"enableChunk"`
+	OpenUpload       int      `json:"openUpload"`
+	ExpireStyle      []string `json:"expireStyle"`
+	ShareCodeLength  int      `json:"shareCodeLength"`
+	ShareCodeCharset string   `json:"shareCodeCharset"`
 }
 
 func registerPublicRoutes(r *server.Hertz) {
@@ -27,17 +29,20 @@ func getPublicConfig(ctx context.Context, c *app.RequestContext) {
 	if cfg == nil {
 		cfg = &conf.AppConfiguration{}
 	}
+	shareCodeLength, shareCodeCharset := conf.GetShareCodeConfig(cfg)
 
 	c.JSON(consts.StatusOK, map[string]any{
 		"code":    200,
 		"message": "success",
 		"data": publicConfigData{
-			Name:        firstNonEmpty(cfg.App.Name, "FileCodeBox"),
-			Description: firstNonEmpty(cfg.App.Description, "安全、便捷的文件分享系统"),
-			UploadSize:  cfg.Upload.UploadSize,
-			EnableChunk: boolToInt(cfg.Upload.EnableChunk),
-			OpenUpload:  boolToInt(cfg.Upload.OpenUpload),
-			ExpireStyle: []string{"minute", "hour", "day", "week", "month", "year", "forever"},
+			Name:             firstNonEmpty(cfg.App.Name, "FileCodeBox"),
+			Description:      firstNonEmpty(cfg.App.Description, "安全、便捷的文件分享系统"),
+			UploadSize:       cfg.Upload.UploadSize,
+			EnableChunk:      boolToInt(cfg.Upload.EnableChunk),
+			OpenUpload:       boolToInt(cfg.Upload.OpenUpload),
+			ExpireStyle:      []string{"minute", "hour", "day", "week", "month", "year", "forever"},
+			ShareCodeLength:  shareCodeLength,
+			ShareCodeCharset: shareCodeCharset,
 		},
 	})
 }

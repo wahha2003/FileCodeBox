@@ -56,6 +56,24 @@
             <el-form-item label="启用分片上传">
               <el-switch v-model="configForm.transfer.upload.enablechunk" :active-value="1" :inactive-value="0" />
             </el-form-item>
+
+            <el-form-item label="分享码位数">
+              <el-input-number
+                v-model="configForm.transfer.upload.sharecodelength"
+                :min="1"
+                :max="32"
+                controls-position="right"
+              />
+              <span style="margin-left: 10px; color: #909399">默认 4 位，位数越短越容易撞码</span>
+            </el-form-item>
+
+            <el-form-item label="分享码字符集">
+              <el-input
+                v-model="configForm.transfer.upload.sharecodecharset"
+                placeholder="例如：0123456789 或 AB0123456789"
+              />
+              <span style="margin-left: 10px; color: #909399">仅保留数字和字母；纯数字时前台会显示数字快捷输入</span>
+            </el-form-item>
           </el-form>
         </el-tab-pane>
 
@@ -127,7 +145,9 @@ const configForm = reactive({
       uploadsize: 10485760,
       requirelogin: 1,
       enablechunk: 1,
-      chunksize: 2097152
+      chunksize: 2097152,
+      sharecodelength: 4,
+      sharecodecharset: '0123456789'
     }
   },
   user: {

@@ -5,38 +5,51 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"strings"
 	"time"
 
+	"github.com/zy84338719/fileCodeBox/backend/internal/conf"
 	"github.com/zy84338719/fileCodeBox/backend/internal/pkg/utils"
 	"github.com/zy84338719/fileCodeBox/backend/internal/repo/db/dao"
 	"github.com/zy84338719/fileCodeBox/backend/internal/repo/db/model"
 	"github.com/zy84338719/fileCodeBox/backend/internal/storage"
+	"golang.org/x/crypto/bcrypt"
 )
 
+var (
+	ErrPasswordRequired      = errors.New("需要密码")
+	ErrInvalidPassword       = errors.New("密码错误")
+	ErrPasswordNotConfigured = errors.New("分享密码未设置")
+)
+
+const maxGenerateCodeAttempts = 64
+
 type ShareTextReq struct {
-	Text         string
-	ExpiredAt    *time.Time
-	ExpiredCount int
-	RequireAuth  bool
-	UserID       *uint
-	UploadType   string
-	OwnerIP      string
+	Text           string
+	ExpiredAt      *time.Time
+	ExpiredCount   int
+	RequireAuth    bool
+	AccessPassword string
+	UserID         *uint
+	UploadType     string
+	OwnerIP        string
 }
 
 type ShareFileReq struct {
-	FilePath     string
-	FileName     string
-	StoredName   string
-	Size         int64
-	ExpiredAt    *time.Time
-	ExpiredCount int
-	RequireAuth  bool
-	UserID       *uint
-	UploadType   string
-	OwnerIP      string
-	FileHash     string
-	IsChunked    bool
-	UploadID     string
+	FilePath       string
+	FileName       string
+	StoredName     string
+	Size           int64
+	ExpiredAt      *time.Time
+	ExpiredCount   int
+	RequireAuth    bool
+	AccessPassword string
+	UserID         *uint
+	UploadType     string
+	OwnerIP        string
+	FileHash       string
+	IsChunked      bool
+	UploadID       string
 }
 
 type ShareResp struct {
@@ -96,35 +109,127 @@ func (s *Service) SetUserService(userService UserServiceInterface) {
 
 // GenerateCode 生成分享代码
 func (s *Service) GenerateCode() string {
-	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	length, charset := conf.GetShareCodeConfig(conf.GetGlobalConfig())
 	seededRand := rand.New(rand.NewSource(time.Now().UnixNano()))
-
-	code := make([]byte, 8)
+	charsetRunes := []rune(charset)
+	code := make([]rune, length)
 	for i := range code {
-		code[i] = charset[seededRand.Intn(len(charset))]
+		code[i] = charsetRunes[seededRand.Intn(len(charsetRunes))]
 	}
 
 	return string(code)
+}
+
+func (s *Service) codeLookupCandidates(code string) []string {
+	trimmed := strings.TrimSpace(code)
+	if trimmed == "" {
+		return []string{trimmed}
+	}
+
+	candidates := []string{trimmed}
+	_, charset := conf.GetShareCodeConfig(conf.GetGlobalConfig())
+	hasLowercase := strings.IndexFunc(charset, func(ch rune) bool {
+		return ch >= 'a' && ch <= 'z'
+	}) >= 0
+	hasUppercase := strings.IndexFunc(charset, func(ch rune) bool {
+		return ch >= 'A' && ch <= 'Z'
+	}) >= 0
+
+	switch {
+	case hasUppercase && !hasLowercase:
+		normalized := strings.ToUpper(trimmed)
+		if normalized != trimmed {
+			candidates = append(candidates, normalized)
+		}
+	case hasLowercase && !hasUppercase:
+		normalized := strings.ToLower(trimmed)
+		if normalized != trimmed {
+			candidates = append(candidates, normalized)
+		}
+	}
+
+	return candidates
+}
+
+func (s *Service) findFileCodeByCode(ctx context.Context, code string) (*model.FileCode, error) {
+	s.ensureRepository()
+
+	var lastErr error
+	for _, candidate := range s.codeLookupCandidates(code) {
+		fileCode, err := s.fileCodeRepo.GetByCode(ctx, candidate)
+		if err == nil {
+			return fileCode, nil
+		}
+		lastErr = err
+	}
+
+	return nil, lastErr
+}
+
+func (s *Service) generateUniqueCode(ctx context.Context) (string, error) {
+	s.ensureRepository()
+
+	for attempt := 0; attempt < maxGenerateCodeAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+
+		code := s.GenerateCode()
+		exists, err := s.fileCodeRepo.CheckCodeExists(ctx, code, 0)
+		if err != nil {
+			return "", err
+		}
+		if !exists {
+			return code, nil
+		}
+	}
+
+	return "", fmt.Errorf("failed to generate unique share code after %d attempts", maxGenerateCodeAttempts)
+}
+
+func (s *Service) createFileCode(ctx context.Context, fileCode *model.FileCode) error {
+	for attempt := 0; attempt < maxGenerateCodeAttempts; attempt++ {
+		code, err := s.generateUniqueCode(ctx)
+		if err != nil {
+			return err
+		}
+
+		fileCode.Code = code
+		if err := s.fileCodeRepo.Create(ctx, fileCode); err == nil {
+			return nil
+		} else {
+			exists, existsErr := s.fileCodeRepo.CheckCodeExists(ctx, code, 0)
+			if existsErr == nil && exists {
+				continue
+			}
+			return err
+		}
+	}
+
+	return fmt.Errorf("failed to persist share after %d attempts because of code collisions", maxGenerateCodeAttempts)
 }
 
 // ShareText 分享文本
 func (s *Service) ShareText(ctx context.Context, req *ShareTextReq) (*ShareResp, error) {
 	s.ensureRepository()
 
-	code := s.GenerateCode()
-
-	fileCode := &model.FileCode{
-		Code:         code,
-		Text:         req.Text,
-		ExpiredAt:    req.ExpiredAt,
-		ExpiredCount: req.ExpiredCount,
-		RequireAuth:  req.RequireAuth,
-		UserID:       req.UserID,
-		UploadType:   req.UploadType,
-		OwnerIP:      req.OwnerIP,
+	accessPasswordHash, err := buildAccessPasswordHash(req.RequireAuth, req.AccessPassword)
+	if err != nil {
+		return nil, err
 	}
 
-	if err := s.fileCodeRepo.Create(ctx, fileCode); err != nil {
+	fileCode := &model.FileCode{
+		Text:               req.Text,
+		ExpiredAt:          req.ExpiredAt,
+		ExpiredCount:       req.ExpiredCount,
+		RequireAuth:        req.RequireAuth,
+		AccessPasswordHash: accessPasswordHash,
+		UserID:             req.UserID,
+		UploadType:         req.UploadType,
+		OwnerIP:            req.OwnerIP,
+	}
+
+	if err := s.createFileCode(ctx, fileCode); err != nil {
 		return nil, err
 	}
 
@@ -139,7 +244,7 @@ func (s *Service) ShareText(ctx context.Context, req *ShareTextReq) (*ShareResp,
 }
 
 // ShareTextWithAuth 带认证的文本分享（用于 Handler）
-func (s *Service) ShareTextWithAuth(ctx context.Context, text string, expireValue int, expireStyle string, userID *uint, ownerIP string) (*ShareResp, error) {
+func (s *Service) ShareTextWithAuth(ctx context.Context, text string, expireValue int, expireStyle string, requireAuth bool, accessPassword string, userID *uint, ownerIP string) (*ShareResp, error) {
 	// 计算过期时间
 	expireTime := utils.CalculateExpireTime(expireValue, expireStyle)
 	expireCount := utils.CalculateExpireCount(expireStyle, expireValue)
@@ -150,12 +255,14 @@ func (s *Service) ShareTextWithAuth(ctx context.Context, text string, expireValu
 	}
 
 	req := &ShareTextReq{
-		Text:         text,
-		ExpiredAt:    expireTime,
-		ExpiredCount: expireCount,
-		UserID:       userID,
-		UploadType:   uploadType,
-		OwnerIP:      ownerIP,
+		Text:           text,
+		ExpiredAt:      expireTime,
+		ExpiredCount:   expireCount,
+		RequireAuth:    requireAuth,
+		AccessPassword: accessPassword,
+		UserID:         userID,
+		UploadType:     uploadType,
+		OwnerIP:        ownerIP,
 	}
 
 	resp, err := s.ShareText(ctx, req)
@@ -174,30 +281,33 @@ func (s *Service) ShareTextWithAuth(ctx context.Context, text string, expireValu
 func (s *Service) ShareFile(ctx context.Context, req *ShareFileReq) (*ShareResp, error) {
 	s.ensureRepository()
 
-	code := s.GenerateCode()
 	displayName := req.FileName
 	if displayName == "" {
 		displayName = req.StoredName
 	}
-
-	fileCode := &model.FileCode{
-		Code:         code,
-		FilePath:     req.FilePath,
-		UUIDFileName: req.StoredName,
-		Size:         req.Size,
-		Text:         displayName,
-		ExpiredAt:    req.ExpiredAt,
-		ExpiredCount: req.ExpiredCount,
-		RequireAuth:  req.RequireAuth,
-		UserID:       req.UserID,
-		UploadType:   req.UploadType,
-		OwnerIP:      req.OwnerIP,
-		FileHash:     req.FileHash,
-		IsChunked:    req.IsChunked,
-		UploadID:     req.UploadID,
+	accessPasswordHash, err := buildAccessPasswordHash(req.RequireAuth, req.AccessPassword)
+	if err != nil {
+		return nil, err
 	}
 
-	if err := s.fileCodeRepo.Create(ctx, fileCode); err != nil {
+	fileCode := &model.FileCode{
+		FilePath:           req.FilePath,
+		UUIDFileName:       req.StoredName,
+		Size:               req.Size,
+		Text:               displayName,
+		ExpiredAt:          req.ExpiredAt,
+		ExpiredCount:       req.ExpiredCount,
+		RequireAuth:        req.RequireAuth,
+		AccessPasswordHash: accessPasswordHash,
+		UserID:             req.UserID,
+		UploadType:         req.UploadType,
+		OwnerIP:            req.OwnerIP,
+		FileHash:           req.FileHash,
+		IsChunked:          req.IsChunked,
+		UploadID:           req.UploadID,
+	}
+
+	if err := s.createFileCode(ctx, fileCode); err != nil {
 		return nil, err
 	}
 
@@ -236,7 +346,7 @@ func (s *Service) ShareFile(ctx context.Context, req *ShareFileReq) (*ShareResp,
 func (s *Service) GetFileByCode(ctx context.Context, code string) (*model.FileCode, error) {
 	s.ensureRepository()
 
-	fileCode, err := s.fileCodeRepo.GetByCode(ctx, code)
+	fileCode, err := s.findFileCodeByCode(ctx, code)
 	if err != nil {
 		return nil, err
 	}
@@ -282,7 +392,7 @@ func (s *Service) DeleteFileByCode(ctx context.Context, code string, userID uint
 	s.ensureRepository()
 
 	// 1. 根据 code 查询文件记录
-	file, err := s.fileCodeRepo.GetByCode(ctx, code)
+	file, err := s.findFileCodeByCode(ctx, code)
 	if err != nil {
 		return fmt.Errorf("分享不存在")
 	}
@@ -331,7 +441,7 @@ func (s *Service) GetFileList(ctx context.Context, page, pageSize int, search st
 func (s *Service) UpdateFileUsage(ctx context.Context, code string) error {
 	s.ensureRepository()
 
-	fileCode, err := s.fileCodeRepo.GetByCode(ctx, code)
+	fileCode, err := s.findFileCodeByCode(ctx, code)
 	if err != nil {
 		return err
 	}
@@ -367,14 +477,48 @@ func (s *Service) GetFileWithUsage(ctx context.Context, code string, password st
 		return nil, err
 	}
 
-	// 检查是否需要密码
-	if fileCode.RequireAuth && password == "" {
-		return nil, errors.New("需要密码")
+	if err := s.ValidateAccess(fileCode, password); err != nil {
+		return nil, err
 	}
 
-	// TODO: 验证密码逻辑（当前仅检查非空）
-
 	return fileCode, nil
+}
+
+func (s *Service) ValidateAccess(fileCode *model.FileCode, password string) error {
+	if fileCode == nil || !fileCode.RequireAuth {
+		return nil
+	}
+
+	if strings.TrimSpace(password) == "" {
+		return ErrPasswordRequired
+	}
+
+	if strings.TrimSpace(fileCode.AccessPasswordHash) == "" {
+		return ErrPasswordNotConfigured
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(fileCode.AccessPasswordHash), []byte(password)); err != nil {
+		return ErrInvalidPassword
+	}
+
+	return nil
+}
+
+func buildAccessPasswordHash(requireAuth bool, accessPassword string) (string, error) {
+	if !requireAuth {
+		return "", nil
+	}
+
+	if strings.TrimSpace(accessPassword) == "" {
+		return "", ErrPasswordRequired
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(accessPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return "", fmt.Errorf("failed to hash access password: %w", err)
+	}
+
+	return string(hashedPassword), nil
 }
 
 // modelToResp 将模型转换为响应

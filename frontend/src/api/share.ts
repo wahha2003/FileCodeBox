@@ -8,12 +8,16 @@ export const shareApi = {
     expire_value: number
     expire_style: string
     require_auth?: boolean
+    password?: string
   }) => {
     const formData = new FormData()
     formData.append('text', data.text)
     formData.append('expire_value', String(data.expire_value))
     formData.append('expire_style', data.expire_style)
     formData.append('require_auth', String(data.require_auth || false))
+    if (data.require_auth && data.password) {
+      formData.append('password', data.password)
+    }
 
     return request<ApiResponse<{
       code: string
@@ -33,6 +37,7 @@ export const shareApi = {
     expire_value: number
     expire_style: string
     require_auth?: boolean
+    password?: string
   }) => {
     const formData = new FormData()
     formData.append('file', data.file)
@@ -40,6 +45,9 @@ export const shareApi = {
     formData.append('expire_style', data.expire_style)
     if (data.require_auth) {
       formData.append('require_auth', 'true')
+    }
+    if (data.require_auth && data.password) {
+      formData.append('password', data.password)
     }
 
     return request<ApiResponse<{
@@ -71,6 +79,7 @@ export const shareApi = {
       url: '/share/select/',
       method: 'GET',
       params: { code, password },
+      withCredentials: true,
     })
   },
 

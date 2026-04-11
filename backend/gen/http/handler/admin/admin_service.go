@@ -272,6 +272,7 @@ func AdminGetConfig(ctx context.Context, c *app.RequestContext) {
 	if cfg == nil {
 		cfg = &conf.AppConfiguration{}
 	}
+	shareCodeLength, shareCodeCharset := conf.GetShareCodeConfig(cfg)
 
 	c.JSON(consts.StatusOK, map[string]interface{}{
 		"code":    200,
@@ -286,11 +287,13 @@ func AdminGetConfig(ctx context.Context, c *app.RequestContext) {
 			},
 			"transfer": map[string]interface{}{
 				"upload": map[string]interface{}{
-					"openupload":   boolToInt(cfg.Upload.OpenUpload),
-					"uploadsize":   cfg.Upload.UploadSize,
-					"requirelogin": boolToInt(cfg.Upload.RequireLogin),
-					"enablechunk":  boolToInt(cfg.Upload.EnableChunk),
-					"chunksize":    cfg.Upload.ChunkSize,
+					"openupload":       boolToInt(cfg.Upload.OpenUpload),
+					"uploadsize":       cfg.Upload.UploadSize,
+					"requirelogin":     boolToInt(cfg.Upload.RequireLogin),
+					"enablechunk":      boolToInt(cfg.Upload.EnableChunk),
+					"chunksize":        cfg.Upload.ChunkSize,
+					"sharecodelength":  shareCodeLength,
+					"sharecodecharset": shareCodeCharset,
 				},
 			},
 			"user": map[string]interface{}{
@@ -321,11 +324,13 @@ func AdminUpdateConfig(ctx context.Context, c *app.RequestContext) {
 			} `json:"base"`
 			Transfer struct {
 				Upload struct {
-					OpenUpload   int   `json:"openupload"`
-					UploadSize   int64 `json:"uploadsize"`
-					RequireLogin int   `json:"requirelogin"`
-					EnableChunk  int   `json:"enablechunk"`
-					ChunkSize    int64 `json:"chunksize"`
+					OpenUpload       int    `json:"openupload"`
+					UploadSize       int64  `json:"uploadsize"`
+					RequireLogin     int    `json:"requirelogin"`
+					EnableChunk      int    `json:"enablechunk"`
+					ChunkSize        int64  `json:"chunksize"`
+					ShareCodeLength  int    `json:"sharecodelength"`
+					ShareCodeCharset string `json:"sharecodecharset"`
 				} `json:"upload"`
 			} `json:"transfer"`
 			User struct {
@@ -373,6 +378,8 @@ func AdminUpdateConfig(ctx context.Context, c *app.RequestContext) {
 	if req.Config.Transfer.Upload.ChunkSize > 0 {
 		cfg.Upload.ChunkSize = req.Config.Transfer.Upload.ChunkSize
 	}
+	cfg.Upload.ShareCodeLength = conf.NormalizeShareCodeLength(req.Config.Transfer.Upload.ShareCodeLength)
+	cfg.Upload.ShareCodeCharset = conf.NormalizeShareCodeCharset(req.Config.Transfer.Upload.ShareCodeCharset)
 
 	cfg.User.AllowUserRegistration = req.Config.User.AllowUserRegistration == 1
 	if req.Config.User.UserUploadSize > 0 {

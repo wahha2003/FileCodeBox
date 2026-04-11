@@ -4,6 +4,7 @@ package share
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"html"
 	"path/filepath"
@@ -12,13 +13,15 @@ import (
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/protocol"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/google/uuid"
 	sharemodel "github.com/zy84338719/fileCodeBox/backend/gen/http/model/share"
 	shareService "github.com/zy84338719/fileCodeBox/backend/internal/app/share"
-	"github.com/zy84338719/fileCodeBox/backend/internal/pkg/httpurl"
 	userService "github.com/zy84338719/fileCodeBox/backend/internal/app/user"
 	"github.com/zy84338719/fileCodeBox/backend/internal/conf"
+	"github.com/zy84338719/fileCodeBox/backend/internal/pkg/httpurl"
+	"github.com/zy84338719/fileCodeBox/backend/internal/pkg/sharetoken"
 	"github.com/zy84338719/fileCodeBox/backend/internal/pkg/utils"
 	"github.com/zy84338719/fileCodeBox/backend/internal/repo/db/dao"
 	dbmodel "github.com/zy84338719/fileCodeBox/backend/internal/repo/db/model"
@@ -34,6 +37,7 @@ var transferLogRepo = dao.NewTransferLogRepository()
 const (
 	defaultMaxUploadSize = 10485760 // 10MB
 	defaultBaseURL       = "http://localhost:12345"
+	shareAccessTokenTTL  = 12 * time.Hour
 )
 
 func getStorageService() storage.StorageInterface {
@@ -90,6 +94,137 @@ func formatExpireTime(expireAt *time.Time) string {
 		return ""
 	}
 	return expireAt.Format("2006-01-02 15:04:05")
+}
+
+func writeSharePasswordError(c *app.RequestContext, statusCode int, err error) {
+	if err == nil {
+		return
+	}
+
+	message := "访问密码错误"
+	switch {
+	case errors.Is(err, shareService.ErrPasswordRequired):
+		message = "需要访问密码"
+	case errors.Is(err, shareService.ErrPasswordNotConfigured):
+		message = "此分享的访问密码未正确设置，请联系分享者重新创建"
+	case errors.Is(err, shareService.ErrInvalidPassword):
+		message = "访问密码错误"
+	}
+
+	c.JSON(statusCode, map[string]interface{}{
+		"code":    403,
+		"message": message,
+		"data": map[string]interface{}{
+			"has_password": true,
+		},
+	})
+}
+
+func writeShareAuthInternalError(c *app.RequestContext, err error) {
+	c.JSON(consts.StatusInternalServerError, map[string]interface{}{
+		"code":    500,
+		"message": fmt.Sprintf("访问授权失败: %v", err),
+	})
+}
+
+func shareTokenSecret() string {
+	if cfg := conf.GetGlobalConfig(); cfg != nil {
+		if secret := strings.TrimSpace(cfg.User.JWTSecret); secret != "" {
+			return "share-access:" + secret
+		}
+	}
+	return "share-access:FileCodeBox2025JWT"
+}
+
+func isSecureShareRequest(c *app.RequestContext) bool {
+	if c == nil {
+		return false
+	}
+
+	if strings.EqualFold(strings.TrimSpace(string(c.GetHeader("X-Forwarded-Proto"))), "https") {
+		return true
+	}
+
+	return strings.EqualFold(strings.TrimSpace(string(c.Request.Scheme())), "https")
+}
+
+func shareAccessExpiry(fileCode *dbmodel.FileCode, now time.Time) time.Time {
+	expiresAt := now.Add(shareAccessTokenTTL)
+	if fileCode != nil && fileCode.ExpiredAt != nil && fileCode.ExpiredAt.Before(expiresAt) {
+		return fileCode.ExpiredAt.UTC()
+	}
+	return expiresAt.UTC()
+}
+
+func clearShareAccessCookie(c *app.RequestContext, code string) {
+	if c == nil || strings.TrimSpace(code) == "" {
+		return
+	}
+
+	c.SetCookie(
+		sharetoken.CookieName(code),
+		"",
+		-1,
+		"/share",
+		"",
+		protocol.CookieSameSiteLaxMode,
+		isSecureShareRequest(c),
+		true,
+	)
+}
+
+func issueShareAccessCookie(c *app.RequestContext, fileCode *dbmodel.FileCode) error {
+	if c == nil || fileCode == nil || !fileCode.RequireAuth {
+		return nil
+	}
+
+	now := time.Now().UTC()
+	expiresAt := shareAccessExpiry(fileCode, now)
+	if !expiresAt.After(now) {
+		return sharetoken.ErrExpiredToken
+	}
+
+	token, err := sharetoken.Sign(fileCode.Code, expiresAt, shareTokenSecret())
+	if err != nil {
+		return err
+	}
+
+	maxAge := int(expiresAt.Sub(now).Seconds())
+	if maxAge < 1 {
+		maxAge = 1
+	}
+
+	c.SetCookie(
+		sharetoken.CookieName(fileCode.Code),
+		token,
+		maxAge,
+		"/share",
+		"",
+		protocol.CookieSameSiteLaxMode,
+		isSecureShareRequest(c),
+		true,
+	)
+	return nil
+}
+
+func authorizeShareAccess(c *app.RequestContext, fileCode *dbmodel.FileCode, password string) error {
+	if fileCode == nil || !fileCode.RequireAuth {
+		return nil
+	}
+
+	cookieToken := strings.TrimSpace(string(c.Cookie(sharetoken.CookieName(fileCode.Code))))
+	if cookieToken != "" {
+		if _, err := sharetoken.Verify(cookieToken, fileCode.Code, shareTokenSecret(), time.Now().UTC()); err == nil {
+			return nil
+		}
+		clearShareAccessCookie(c, fileCode.Code)
+	}
+
+	if err := getShareService().ValidateAccess(fileCode, password); err != nil {
+		return err
+	}
+
+	return issueShareAccessCookie(c, fileCode)
 }
 
 func recordTransferLog(ctx context.Context, c *app.RequestContext, operation string, fileCode *dbmodel.FileCode) {
@@ -152,6 +287,14 @@ func ShareText(ctx context.Context, c *app.RequestContext) {
 
 	// XSS 防护：对文本内容进行 HTML 转义
 	safeText := html.EscapeString(req.Text)
+	password := c.DefaultPostForm("password", "")
+	if req.RequireAuth && strings.TrimSpace(password) == "" {
+		c.JSON(consts.StatusBadRequest, map[string]interface{}{
+			"code":    400,
+			"message": "开启访问保护后必须设置访问密码",
+		})
+		return
+	}
 
 	// 获取用户ID（如果有）
 	var userID *uint
@@ -170,10 +313,19 @@ func ShareText(ctx context.Context, c *app.RequestContext) {
 		safeText,
 		int(req.ExpireValue),
 		req.ExpireStyle,
+		req.RequireAuth,
+		password,
 		userID,
 		ownerIP,
 	)
 	if err != nil {
+		if errors.Is(err, shareService.ErrPasswordRequired) {
+			c.JSON(consts.StatusBadRequest, map[string]interface{}{
+				"code":    400,
+				"message": "开启访问保护后必须设置访问密码",
+			})
+			return
+		}
 		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
 			"code":    500,
 			"message": err.Error(),
@@ -205,6 +357,13 @@ func ShareFile(ctx context.Context, c *app.RequestContext) {
 	expireStyle := c.DefaultPostForm("expire_style", "day")
 	requireAuth := c.DefaultPostForm("require_auth", "false") == "true"
 	password := c.DefaultPostForm("password", "")
+	if requireAuth && strings.TrimSpace(password) == "" {
+		c.JSON(consts.StatusBadRequest, map[string]interface{}{
+			"code":    400,
+			"message": "开启访问保护后必须设置访问密码",
+		})
+		return
+	}
 
 	expireValue, err := strconv.Atoi(expireValueStr)
 	if err != nil {
@@ -279,31 +438,36 @@ func ShareFile(ctx context.Context, c *app.RequestContext) {
 
 	// 11. 构建分享请求
 	shareReq := &shareService.ShareFileReq{
-		FilePath:     relativePath,
-		FileName:     originalFilename,
-		StoredName:   uuidFileName,
-		Size:         result.FileSize,
-		ExpiredAt:    expireTime,
-		ExpiredCount: expireCount,
-		RequireAuth:  requireAuth,
-		UserID:       userID,
-		UploadType:   uploadType,
-		OwnerIP:      ownerIP,
-		FileHash:     result.FileHash,
+		FilePath:       relativePath,
+		FileName:       originalFilename,
+		StoredName:     uuidFileName,
+		Size:           result.FileSize,
+		ExpiredAt:      expireTime,
+		ExpiredCount:   expireCount,
+		RequireAuth:    requireAuth,
+		AccessPassword: password,
+		UserID:         userID,
+		UploadType:     uploadType,
+		OwnerIP:        ownerIP,
+		FileHash:       result.FileHash,
 	}
 
 	// 12. 调用 service 创建分享记录
 	shareResult, err := getShareService().ShareFile(ctx, shareReq)
 	if err != nil {
+		if errors.Is(err, shareService.ErrPasswordRequired) {
+			c.JSON(consts.StatusBadRequest, map[string]interface{}{
+				"code":    400,
+				"message": "开启访问保护后必须设置访问密码",
+			})
+			return
+		}
 		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
 			"code":    500,
 			"message": fmt.Sprintf("创建分享记录失败: %v", err),
 		})
 		return
 	}
-
-	// 保存 password 用于验证（如果需要）
-	_ = password // TODO: 实现密码验证逻辑
 
 	createdFile, _ := getShareService().GetFileByCode(ctx, shareResult.Code)
 	recordTransferLog(ctx, c, "upload", createdFile)
@@ -485,19 +649,16 @@ func GetShare(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 
-	// 检查是否需要密码
-	if fileCode.RequireAuth && password == "" {
-		c.JSON(consts.StatusOK, map[string]interface{}{
-			"code":    403,
-			"message": "需要密码",
-			"data": map[string]interface{}{
-				"has_password": true,
-			},
-		})
+	if err := authorizeShareAccess(c, fileCode, password); err != nil {
+		if errors.Is(err, shareService.ErrPasswordRequired) ||
+			errors.Is(err, shareService.ErrInvalidPassword) ||
+			errors.Is(err, shareService.ErrPasswordNotConfigured) {
+			writeSharePasswordError(c, consts.StatusOK, err)
+			return
+		}
+		writeShareAuthInternalError(c, err)
 		return
 	}
-
-	// TODO: 验证密码
 
 	data := map[string]interface{}{
 		"code":         fileCode.Code,
@@ -539,23 +700,23 @@ func DownloadFile(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 
-	// 获取分享内容并增加使用次数
-	fileCode, err := getShareService().GetFileWithUsage(ctx, code, password)
+	fileCode, err := getShareService().GetFileByCode(ctx, code)
 	if err != nil {
-		if err.Error() == "需要密码" {
-			c.JSON(consts.StatusUnauthorized, map[string]interface{}{
-				"code":    401,
-				"message": "需要密码",
-				"data": map[string]interface{}{
-					"has_password": true,
-				},
-			})
-			return
-		}
 		c.JSON(consts.StatusNotFound, map[string]interface{}{
 			"code":    404,
 			"message": "分享不存在或已过期",
 		})
+		return
+	}
+
+	if err := authorizeShareAccess(c, fileCode, password); err != nil {
+		if errors.Is(err, shareService.ErrPasswordRequired) ||
+			errors.Is(err, shareService.ErrInvalidPassword) ||
+			errors.Is(err, shareService.ErrPasswordNotConfigured) {
+			writeSharePasswordError(c, consts.StatusUnauthorized, err)
+			return
+		}
+		writeShareAuthInternalError(c, err)
 		return
 	}
 
