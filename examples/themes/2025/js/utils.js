@@ -1,5 +1,80 @@
 // 工具函数模块 - 通用的辅助函数
 
+const FILECODEBOX_DEV_API_ORIGIN = 'http://api.localhost:12345';
+
+function resolveApiBaseUrl() {
+    const configured = window.FILECODEBOX_API_BASE_URL || document.documentElement.dataset.apiBaseUrl;
+    if (configured) {
+        return String(configured).replace(/\/+$/, '');
+    }
+
+    const { protocol, hostname } = window.location;
+    if (hostname === 'api.localhost') {
+        return FILECODEBOX_DEV_API_ORIGIN;
+    }
+
+    if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
+        return FILECODEBOX_DEV_API_ORIGIN;
+    }
+
+    if (hostname.startsWith('api.')) {
+        return window.location.origin.replace(/\/+$/, '');
+    }
+
+    const normalizedHost = hostname.replace(/^(www|app)\./i, '');
+    return `${protocol}//api.${normalizedHost}`;
+}
+
+function buildApiUrl(path) {
+    if (!path) {
+        return resolveApiBaseUrl();
+    }
+
+    if (/^https?:\/\//i.test(path)) {
+        return path;
+    }
+
+    const normalized = path.startsWith('/') ? path.slice(1) : path;
+    return new URL(normalized, `${resolveApiBaseUrl()}/`).toString();
+}
+
+function buildApiDownloadUrl(code, password = '') {
+    const query = new URLSearchParams({ code });
+    if (password) {
+        query.set('password', password);
+    }
+    return buildApiUrl(`/share/download?${query.toString()}`);
+}
+
+function buildPublicShareUrl(code) {
+    return `${window.location.origin.replace(/\/+$/, '')}/#/share/${encodeURIComponent(code)}`;
+}
+
+function buildSwaggerUrl() {
+    return buildApiUrl('/swagger/index.html');
+}
+
+async function generateQRCodeImageUrl(data, size = 200) {
+    const response = await fetch(buildApiUrl('/qrcode/generate'), {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            data,
+            size,
+            return_base64: false
+        })
+    });
+
+    const result = await response.json();
+    if (!response.ok || result.code !== 200 || !result.data?.image_url) {
+        throw new Error(result.message || '二维码生成失败');
+    }
+
+    return buildApiUrl(result.data.image_url);
+}
+
 /**
  * 格式化文件大小
  * @param {number} bytes 字节数
@@ -326,3 +401,10 @@ function formatDateTime(date) {
         second: '2-digit'
     });
 }
+
+window.resolveApiBaseUrl = resolveApiBaseUrl;
+window.buildApiUrl = buildApiUrl;
+window.buildApiDownloadUrl = buildApiDownloadUrl;
+window.buildPublicShareUrl = buildPublicShareUrl;
+window.buildSwaggerUrl = buildSwaggerUrl;
+window.generateQRCodeImageUrl = generateQRCodeImageUrl;

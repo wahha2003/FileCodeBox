@@ -2,6 +2,48 @@
 
 // 注意：authToken 全局变量已在 main.js 中声明
 
+const ADMIN_DEV_API_ORIGIN = 'http://api.localhost:12345';
+
+function resolveAdminApiBaseUrl() {
+    const configured = window.FILECODEBOX_API_BASE_URL || document.documentElement.dataset.apiBaseUrl;
+    if (configured) {
+        return String(configured).replace(/\/+$/, '');
+    }
+
+    const { protocol, hostname } = window.location;
+    if (hostname === 'api.localhost') {
+        return ADMIN_DEV_API_ORIGIN;
+    }
+
+    if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
+        return ADMIN_DEV_API_ORIGIN;
+    }
+
+    if (hostname.startsWith('api.')) {
+        return window.location.origin.replace(/\/+$/, '');
+    }
+
+    const normalizedHost = hostname.replace(/^(www|app)\./i, '');
+    return `${protocol}//api.${normalizedHost}`;
+}
+
+function buildAdminApiUrl(url) {
+    if (!url) {
+        return resolveAdminApiBaseUrl();
+    }
+
+    if (/^https?:\/\//i.test(url)) {
+        return url;
+    }
+
+    const normalized = url.startsWith('/') ? url.slice(1) : url;
+    return new URL(normalized, `${resolveAdminApiBaseUrl()}/`).toString();
+}
+
+function buildAdminSwaggerUrl() {
+    return buildAdminApiUrl('/swagger/index.html');
+}
+
 /**
  * API请求封装
  * @param {string} url - 请求URL
@@ -33,7 +75,7 @@ async function apiRequest(url, options = {}) {
     };
     
     try {
-        const response = await fetch(url, finalOptions);
+        const response = await fetch(buildAdminApiUrl(url), finalOptions);
         
         // 处理认证失败
         if (response.status === 401) {
@@ -156,7 +198,7 @@ async function apiUpload(url, formData, onProgress = null) {
         });
         
         // 配置请求
-        xhr.open('POST', url);
+        xhr.open('POST', buildAdminApiUrl(url));
         if (currentAuthToken) {
             xhr.setRequestHeader('Authorization', 'Bearer ' + currentAuthToken);
         }
@@ -182,7 +224,7 @@ async function apiDownload(url, filename = 'download') {
             headers['Authorization'] = 'Bearer ' + currentAuthToken;
         }
         
-        const response = await fetch(url, { headers });
+        const response = await fetch(buildAdminApiUrl(url), { headers });
         
         if (response.status === 401) {
             handleAuthError();
@@ -347,7 +389,7 @@ const API_ENDPOINTS = {
     LOGOUT: '/admin/logout',
     
     // 仪表板
-    DASHBOARD: '/admin/dashboard',
+    DASHBOARD: '/admin/stats',
     
     // 文件管理
     FILES: '/admin/files',
@@ -389,6 +431,9 @@ const API_ENDPOINTS = {
 // 导出API函数（如果使用模块系统）
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
+        resolveAdminApiBaseUrl,
+        buildAdminApiUrl,
+        buildAdminSwaggerUrl,
         apiRequest,
         apiGet,
         apiPost,
@@ -407,3 +452,7 @@ if (typeof module !== 'undefined' && module.exports) {
         API_ENDPOINTS
     };
 }
+
+window.resolveAdminApiBaseUrl = resolveAdminApiBaseUrl;
+window.buildAdminApiUrl = buildAdminApiUrl;
+window.buildAdminSwaggerUrl = buildAdminSwaggerUrl;

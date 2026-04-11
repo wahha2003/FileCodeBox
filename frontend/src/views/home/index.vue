@@ -171,6 +171,7 @@ import { useConfigStore } from '@/stores/config'
 import FileUpload from '@/components/upload/FileUpload.vue'
 import TextShare from '@/components/upload/TextShare.vue'
 import GetShare from '@/components/upload/GetShare.vue'
+import { buildPublicShareUrl } from '@/utils/origin'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -189,23 +190,7 @@ interface ShareResult {
 }
 
 const handleShareSuccess = async (result: ShareResult) => {
-  // 确保使用正确的 hash 路由格式
-  let url = result.full_share_url || result.share_url
-  
-  // 如果 URL 不包含 #，则添加（适配 hash 路由模式）
-  if (!url.includes('#')) {
-    // 如果是相对路径 /share/xxx，转换为完整 URL
-    if (url.startsWith('/')) {
-      url = `${window.location.origin}/#${url}`
-    } else {
-      // 否则在路径前添加 #
-      const pathIndex = url.indexOf('/share/')
-      if (pathIndex > 0) {
-        url = url.substring(0, pathIndex) + '/#' + url.substring(pathIndex)
-      }
-    }
-  }
-  
+  const url = result.full_share_url || buildPublicShareUrl(result.code)
   shareUrl.value = url
   showShareDialog.value = true
   

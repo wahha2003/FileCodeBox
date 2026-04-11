@@ -62,7 +62,7 @@ const ShareManager = {
                 headers['Authorization'] = 'Bearer ' + token;
             }
             
-            const response = await fetch('/share/text/', {
+            const response = await fetch(buildApiUrl('/share/text/'), {
                 method: 'POST',
                 headers: headers,
                 body: formData
@@ -76,7 +76,7 @@ const ShareManager = {
                 copyToClipboardAuto(shareCode);
                 
                 // 生成二维码
-                const qrCodeData = result.data.qr_code_data || result.data.full_share_url || `${window.location.origin}/s/${shareCode}`;
+                const qrCodeData = result.data.qr_code_data || result.data.full_share_url || buildPublicShareUrl(shareCode);
                 
                 showResult(`
                     <h3>文本分享成功！</h3>
@@ -130,10 +130,10 @@ const ShareManager = {
                 headers['Authorization'] = 'Bearer ' + token;
             }
             
-            const response = await fetch('/share/select/', {
-                method: 'POST',
+            const query = new URLSearchParams({ code });
+            const response = await fetch(buildApiUrl(`/share/select/?${query.toString()}`), {
+                method: 'GET',
                 headers: headers,
-                body: JSON.stringify({ code: code })
             });
             
             const result = await response.json();
@@ -141,7 +141,7 @@ const ShareManager = {
             if (result.code === 200) {
                 const detail = result.data;
                 
-                if (detail.text.startsWith('http') || detail.text.startsWith('/share/download')) {
+                if (detail.url) {
                     // 文件下载
                     this.showFileResult(detail);
                 } else {
@@ -170,6 +170,7 @@ const ShareManager = {
     showFileResult(detail) {
         const fileSize = detail.size ? formatFileSize(detail.size) : '未知';
         const fileName = detail.name ? escapeHtml(detail.name) : '未知文件';
+        const downloadUrl = detail.url ? buildApiUrl(detail.url) : '#';
         
         showResult(`
             <h3>📁 文件信息</h3>
@@ -177,7 +178,7 @@ const ShareManager = {
                 <p><strong>文件名:</strong> ${fileName}</p>
                 <p><strong>大小:</strong> ${fileSize}</p>
                 <div style="margin-top: 15px;">
-                    <a href="${detail.text}" class="btn" download style="background: #28a745; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">📥 下载文件</a>
+                    <a href="${downloadUrl}" class="btn" download style="background: #28a745; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">📥 下载文件</a>
                 </div>
             </div>
         `);
@@ -211,18 +212,14 @@ const ShareManager = {
      * 生成二维码
      * @param {string} data - 二维码数据
      */
-    generateQRCode(data) {
+    async generateQRCode(data) {
         const container = document.getElementById('qr-code-container');
         if (!container) return;
         
         // 显示加载状态
         container.innerHTML = '<div class="qr-loading">正在生成二维码...</div>';
         
-        // 调用后端API生成二维码
-        const qrUrl = `/api/qrcode/generate?data=${encodeURIComponent(data)}&size=200`;
-        
         const img = document.createElement('img');
-        img.src = qrUrl;
         img.alt = '二维码';
         img.style.maxWidth = '100%';
         img.style.height = 'auto';
@@ -239,6 +236,13 @@ const ShareManager = {
             console.error('二维码加载失败');
             container.innerHTML = '<div class="qr-error">二维码生成失败，请刷新重试</div>';
         };
+
+        try {
+            img.src = await generateQRCodeImageUrl(data, 200);
+        } catch (error) {
+            console.error('二维码生成失败', error);
+            container.innerHTML = '<div class="qr-error">二维码生成失败，请刷新重试</div>';
+        }
     }
 };
 

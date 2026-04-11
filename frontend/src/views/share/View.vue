@@ -137,6 +137,7 @@ import {
   Box, HomeFilled, Document, Folder, Download, CopyDocument, Loading 
 } from '@element-plus/icons-vue'
 import { shareApi } from '@/api/share'
+import { buildApiUrl } from '@/utils/origin'
 
 const route = useRoute()
 
@@ -201,7 +202,7 @@ const copyText = async () => {
 const downloadFile = () => {
   if (!shareCode.value) return
   
-  let url = `/share/download?code=${shareCode.value}`
+  let url = buildApiUrl(`/share/download?code=${encodeURIComponent(shareCode.value)}`)
   if (password.value) {
     url += `&password=${encodeURIComponent(password.value)}`
   }

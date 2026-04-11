@@ -19,7 +19,7 @@ type publicConfigData struct {
 }
 
 func registerPublicRoutes(r *server.Hertz) {
-	r.GET("/api/config", getPublicConfig)
+	r.GET("/config", getPublicConfig)
 }
 
 func getPublicConfig(ctx context.Context, c *app.RequestContext) {

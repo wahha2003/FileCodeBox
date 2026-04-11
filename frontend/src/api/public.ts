@@ -15,7 +15,7 @@ export const publicApi = {
   // 获取公开配置
   getConfig: () => {
     return request<ApiResponse<PublicConfig>>({
-      url: '/api/config',
+      url: '/config',
       method: 'GET',
     })
   },

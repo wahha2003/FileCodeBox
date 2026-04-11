@@ -87,7 +87,7 @@ const UserAuth = {
         try {
             const token = this.getToken();
             if (token) {
-                await fetch('/user/logout', {
+                await fetch(buildApiUrl('/user/logout'), {
                     method: 'POST',
                     headers: {
                         'Authorization': 'Bearer ' + token
@@ -145,7 +145,7 @@ const UserSystem = {
      */
     async checkSystemStatus() {
         try {
-            const response = await fetch('/user/system-info');
+            const response = await fetch(buildApiUrl('/user/system-info'));
             const result = await response.json();
             
             if (result.code === 200) {

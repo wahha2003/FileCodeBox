@@ -30,11 +30,13 @@ func GetGlobalConfig() *AppConfiguration {
 
 // ServerConfig 服务器配置
 type ServerConfig struct {
-	Host         string `mapstructure:"host"`
-	Port         int    `mapstructure:"port"`
-	Mode         string `mapstructure:"mode"` // debug, release, test
-	ReadTimeout  int    `mapstructure:"read_timeout"`
-	WriteTimeout int    `mapstructure:"write_timeout"`
+	Host          string `mapstructure:"host"`
+	Port          int    `mapstructure:"port"`
+	Mode          string `mapstructure:"mode"` // debug, release, test
+	BaseURL       string `mapstructure:"base_url"`
+	PublicBaseURL string `mapstructure:"public_base_url"`
+	ReadTimeout   int    `mapstructure:"read_timeout"`
+	WriteTimeout  int    `mapstructure:"write_timeout"`
 }
 
 // DatabaseConfig 数据库配置

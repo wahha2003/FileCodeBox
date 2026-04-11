@@ -460,7 +460,7 @@ function changePageSize(module) {
 
 async function downloadFile(fileId) {
     try {
-        const response = await fetch('/admin/files/' + fileId + '/download', {
+        const response = await fetch(buildAdminApiUrl('/admin/files/' + fileId + '/download'), {
             headers: {
                 'Authorization': 'Bearer ' + (authToken || '')
             }
@@ -497,7 +497,7 @@ async function downloadFile(fileId) {
 
 async function copyFileLink(fileCode) {
     try {
-        const link = window.location.origin + '/file/' + fileCode;
+        const link = `${window.location.origin.replace(/\/+$/, '')}/#/share/${encodeURIComponent(fileCode)}`;
         await navigator.clipboard.writeText(link);
         FilesManager.showAlert('链接已复制到剪贴板', 'success');
     } catch (error) {

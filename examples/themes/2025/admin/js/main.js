@@ -303,7 +303,7 @@ async function handleAdminLogin(event) {
     try {
         showLoading('正在登录...');
         
-        const response = await fetch('/admin/login', {
+        const response = await fetch(buildAdminApiUrl('/admin/login'), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -497,7 +497,7 @@ async function showAdminPage() {
 async function verifyToken() {
     try {
         // 使用用户API验证token并检查管理员权限
-        const result = await apiRequest('/user/profile');
+        const result = await apiRequest('/user/info');
         if (result.code === 200 && result.data && result.data.role === 'admin') {
             return true;
         }
@@ -554,7 +554,7 @@ async function apiRequest(url, options = {}) {
         console.log('🔓 无token，发送匿名API请求:', url);
     }
     
-    const response = await fetch(url, finalOptions);
+    const response = await fetch(buildAdminApiUrl(url), finalOptions);
     console.log('📡 API响应状态:', response.status, response.statusText);
 
     if (response.status === 401) {
@@ -593,7 +593,7 @@ async function loadStats() {
     }
     
     try {
-        const result = await apiRequest('/admin/dashboard');
+        const result = await apiRequest('/admin/stats');
         
         if (result.code === 200) {
             const stats = result.data;
@@ -774,7 +774,7 @@ function setSwaggerIframeSource(iframe, forceReload = false) {
     clearSwaggerMonitorTimer();
     setSwaggerPlaceholderState('loading', null, iframe);
 
-    const baseUrl = iframe.dataset.src || '/swagger/index.html';
+    const baseUrl = buildAdminSwaggerUrl();
     const nextUrl = forceReload
         ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}ts=${Date.now()}`
         : baseUrl;
@@ -840,7 +840,7 @@ function reloadSwaggerPreview() {
 }
 
 function openSwaggerInNewWindow() {
-    window.open('/swagger/index.html', '_blank', 'noopener,noreferrer');
+    window.open(buildAdminSwaggerUrl(), '_blank', 'noopener,noreferrer');
 }
 
 function clearSwaggerMonitorTimer() {

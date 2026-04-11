@@ -1,11 +1,7 @@
 import axios from 'axios'
 import type { AxiosInstance, AxiosRequestConfig } from 'axios'
 import { ElMessage } from 'element-plus'
-
-// 读取 Vite 环境变量：
-//   开发环境 (.env)           -> VITE_API_BASE_URL=''   -> 请求相对路径，由 vite.config.ts proxy 转发
-//   生产环境 (.env.production) -> VITE_API_BASE_URL=https://your-backend.com -> 直接请求宿主机后端
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string || ''
+import { API_BASE_URL } from './origin'
 
 const instance: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
@@ -33,13 +29,21 @@ instance.interceptors.response.use(
   },
   (error) => {
     const requestUrl = error.config?.url || ''
+    const pathname = (() => {
+      try {
+        return new URL(requestUrl, API_BASE_URL).pathname
+      } catch {
+        return requestUrl
+      }
+    })()
+
     if (error.response) {
       switch (error.response.status) {
         case 401:
           ElMessage.error('未授权，请重新登录')
           localStorage.removeItem('token')
           localStorage.removeItem('userRole')
-          window.location.href = requestUrl.startsWith('/admin') ? '/admin/login' : '/user/login'
+          window.location.href = pathname.startsWith('/admin') ? '/admin/login' : '/user/login'
           break
         case 403:
           ElMessage.error('拒绝访问')

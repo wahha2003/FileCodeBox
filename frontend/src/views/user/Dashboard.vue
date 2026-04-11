@@ -238,6 +238,7 @@ import {
 import { useUserStore } from '@/stores/user'
 import { userApi, shareApi } from '@/api'
 import type { UserInfo, UserStats } from '@/types/user'
+import { buildPublicShareUrl } from '@/utils/origin'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -328,13 +329,13 @@ const saveUserInfo = async () => {
 }
 
 const viewShare = (code: string) => {
-  const url = `${window.location.origin}/#/share/${code}`
+  const url = buildPublicShareUrl(code)
   window.open(url, '_blank')
 }
 
 const copyShareLink = async (code: string) => {
   try {
-    const url = `${window.location.origin}/#/share/${code}`
+    const url = buildPublicShareUrl(code)
     await navigator.clipboard.writeText(url)
     ElMessage.success('链接已复制到剪贴板')
   } catch (error) {

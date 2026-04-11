@@ -90,9 +90,7 @@ class FileCodeBoxApp {
      */
     async loadConfig() {
         try {
-            const response = await fetch('/', {
-                method: 'POST'
-            });
+            const response = await fetch(buildApiUrl('/config'));
             const result = await response.json();
             
             if (result.code === 200) {

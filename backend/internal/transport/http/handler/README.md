@@ -60,7 +60,7 @@ func (h *UserHandler) GetUserProfile(ctx context.Context, c *app.RequestContext)
 ```go
 // 在路由中间件或自定义路由文件中
 userHandler := handler.NewUserHandler()
-r.GET("/api/v1/user/:id/profile", userHandler.GetUserProfile)
+r.GET("/v1/user/:id/profile", userHandler.GetUserProfile)
 ```
 
 ## 依赖规则

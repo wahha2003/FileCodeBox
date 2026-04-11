@@ -29,9 +29,11 @@ func CORS() app.HandlerFunc {
 
 		c.Header("Access-Control-Allow-Origin", origin)
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
-		c.Header("Access-Control-Expose-Headers", "Content-Length, Access-Control-Allow-Origin, Access-Control-Allow-Headers, Content-Type")
-		c.Header("Access-Control-Allow-Credentials", "true")
+		c.Header("Access-Control-Allow-Headers", "Origin, Accept, Content-Type, Authorization, X-Requested-With, X-API-Key")
+		c.Header("Access-Control-Expose-Headers", "Content-Length, Content-Type, Content-Disposition")
+		if origin != "*" {
+			c.Header("Access-Control-Allow-Credentials", "true")
+		}
 		c.Header("Access-Control-Max-Age", "86400")
 
 		if string(c.Method()) == "OPTIONS" {
@@ -55,6 +57,8 @@ func InitConfig(configPath string) (*Config, error) {
 	v.SetDefault("server.host", "0.0.0.0")
 	v.SetDefault("server.port", 12345)
 	v.SetDefault("server.mode", "debug")
+	v.SetDefault("server.base_url", "http://api.localhost:12345")
+	v.SetDefault("server.public_base_url", "http://localhost:3000")
 	v.SetDefault("database.driver", "sqlite")
 	v.SetDefault("database.db_name", "./data/filecodebox.db")
 	v.SetDefault("user.allow_user_registration", true)

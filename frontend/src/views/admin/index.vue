@@ -116,6 +116,7 @@ import {
   Box, Document, Tools, Promotion, SwitchButton 
 } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
+import { buildPublicUrl } from '@/utils/origin'
 
 const router = useRouter()
 const route = useRoute()
@@ -136,7 +137,7 @@ const pageTitle = computed(() => {
 })
 
 const goToUser = () => {
-  window.open('/', '_blank')
+  window.open(buildPublicUrl('/'), '_blank')
 }
 
 const handleCommand = async (command: string) => {

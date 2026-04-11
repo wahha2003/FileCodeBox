@@ -163,7 +163,7 @@ message HelloResp {
 
 service ExampleService {
     rpc Hello(HelloReq) returns(HelloResp) {
-        option (api.get) = "/api/v1/hello";
+        option (api.get) = "/v1/hello";
     }
 }
 ```

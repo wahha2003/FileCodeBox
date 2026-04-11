@@ -57,6 +57,7 @@ import { CopyDocument } from '@element-plus/icons-vue'
 import FileUpload from '@/components/upload/FileUpload.vue'
 import TextShare from '@/components/upload/TextShare.vue'
 import GetShare from '@/components/upload/GetShare.vue'
+import { buildPublicShareUrl } from '@/utils/origin'
 
 const route = useRoute()
 const activeTab = ref('upload')
@@ -72,7 +73,7 @@ interface ShareResult {
 }
 
 const handleSuccess = (result: ShareResult) => {
-  shareUrl.value = result.full_share_url || result.share_url
+  shareUrl.value = result.full_share_url || buildPublicShareUrl(result.code)
   showSuccessDialog.value = true
 }
 

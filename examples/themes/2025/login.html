@@ -55,6 +55,26 @@
     </div>
 
     <script>
+        const API_BASE_URL = (() => {
+            const { protocol, hostname } = window.location;
+            if (hostname === 'api.localhost' || hostname === 'localhost' || hostname.endsWith('.localhost')) {
+                return 'http://api.localhost:12345';
+            }
+            if (hostname.startsWith('api.')) {
+                return window.location.origin.replace(/\/+$/, '');
+            }
+            const normalizedHost = hostname.replace(/^(www|app)\./i, '');
+            return `${protocol}//api.${normalizedHost}`;
+        })();
+
+        function buildApiUrl(path) {
+            if (/^https?:\/\//i.test(path)) {
+                return path;
+            }
+            const normalized = path.startsWith('/') ? path.slice(1) : path;
+            return new URL(normalized, `${API_BASE_URL}/`).toString();
+        }
+
         // 显示消息
         function showMessage(message, isError = true) {
             const messageEl = document.getElementById('login-message');
@@ -78,7 +98,7 @@
         // 检查用户系统配置
         async function checkUserSystem() {
             try {
-                const response = await fetch('/user/system-info');
+                const response = await fetch(buildApiUrl('/user/system-info'));
                 const result = await response.json();
                 
                 const loginWrapper = document.getElementById('login-wrapper');
@@ -119,7 +139,7 @@
             const data = Object.fromEntries(formData);
             
             try {
-                const response = await fetch('/user/login', {
+                const response = await fetch(buildApiUrl('/user/login'), {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -137,7 +157,7 @@
 
                     // 立即请求用户信息并保存到 localStorage，以便前端其它模块不会因为缺少 user_info 而阻塞渲染
                     try {
-                        const profileResp = await fetch('/user/profile', {
+                        const profileResp = await fetch(buildApiUrl('/user/info'), {
                             method: 'GET',
                             headers: {
                                 'Content-Type': 'application/json',

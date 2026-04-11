@@ -2,6 +2,9 @@ package db
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/glebarez/sqlite"
@@ -15,6 +18,20 @@ import (
 )
 
 var DB *gorm.DB
+
+func ensureSQLiteDatabaseDir(dbName string) error {
+	dbName = strings.TrimSpace(dbName)
+	if dbName == "" || dbName == ":memory:" || strings.HasPrefix(dbName, "file:") {
+		return nil
+	}
+
+	dir := filepath.Dir(filepath.Clean(dbName))
+	if dir == "." || dir == "" {
+		return nil
+	}
+
+	return os.MkdirAll(dir, 0o755)
+}
 
 func Init(cfg *conf.DatabaseConfig) error {
 	var err error
@@ -34,6 +51,9 @@ func Init(cfg *conf.DatabaseConfig) error {
 			cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.DBName)
 		dialector = postgres.Open(dsn)
 	case "sqlite":
+		if err := ensureSQLiteDatabaseDir(cfg.DBName); err != nil {
+			return fmt.Errorf("failed to prepare sqlite database directory: %w", err)
+		}
 		dialector = sqlite.Open(cfg.DBName)
 	default:
 		return fmt.Errorf("unsupported database driver: %s", cfg.Driver)

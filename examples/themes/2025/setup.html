@@ -337,6 +337,26 @@
     </div>
 
     <script>
+        const API_BASE_URL = (() => {
+            const { protocol, hostname } = window.location;
+            if (hostname === 'api.localhost' || hostname === 'localhost' || hostname.endsWith('.localhost')) {
+                return 'http://api.localhost:12345';
+            }
+            if (hostname.startsWith('api.')) {
+                return window.location.origin.replace(/\/+$/, '');
+            }
+            const normalizedHost = hostname.replace(/^(www|app)\./i, '');
+            return `${protocol}//api.${normalizedHost}`;
+        })();
+
+        function buildApiUrl(path) {
+            if (/^https?:\/\//i.test(path)) {
+                return path;
+            }
+            const normalized = path.startsWith('/') ? path.slice(1) : path;
+            return new URL(normalized, `${API_BASE_URL}/`).toString();
+        }
+
         let currentStep = 1;
         const totalSteps = 3;
 
@@ -594,7 +614,7 @@
                     payload.admin.allowUserRegistration = (flat.enable_user_registration === 'true');
                 }
 
-                const response = await fetch('/setup', {
+                const response = await fetch(buildApiUrl('/setup'), {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',

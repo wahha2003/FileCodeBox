@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	sharemodel "github.com/zy84338719/fileCodeBox/backend/gen/http/model/share"
 	shareService "github.com/zy84338719/fileCodeBox/backend/internal/app/share"
+	"github.com/zy84338719/fileCodeBox/backend/internal/pkg/httpurl"
 	userService "github.com/zy84338719/fileCodeBox/backend/internal/app/user"
 	"github.com/zy84338719/fileCodeBox/backend/internal/conf"
 	"github.com/zy84338719/fileCodeBox/backend/internal/pkg/utils"
@@ -58,25 +59,9 @@ func getShareService() *shareService.Service {
 	return shareSvc
 }
 
-func buildBaseURL(c *app.RequestContext) string {
-	scheme := string(c.GetHeader("X-Forwarded-Proto"))
-	if scheme == "" {
-		scheme = string(c.Request.Scheme())
-	}
-	if scheme == "" {
-		scheme = "http"
-	}
-
-	host := string(c.Host())
-	if host == "" {
-		return defaultBaseURL
-	}
-	return fmt.Sprintf("%s://%s", scheme, host)
-}
-
 func buildShareLinks(c *app.RequestContext, code string) (string, string, string) {
 	sharePath := fmt.Sprintf("/share/%s", code)
-	fullShareURL := fmt.Sprintf("%s/#%s", strings.TrimRight(buildBaseURL(c), "/"), sharePath)
+	fullShareURL := httpurl.BuildPublicShareURL(c, code)
 	return sharePath, fullShareURL, fullShareURL
 }
 
@@ -530,7 +515,7 @@ func GetShare(ctx context.Context, c *app.RequestContext) {
 		data["size"] = fileCode.Size
 		data["file_size"] = fileCode.Size
 		data["upload_type"] = "file"
-		data["url"] = fmt.Sprintf("/share/download?code=%s", fileCode.Code)
+		data["url"] = httpurl.BuildAPIDownloadURL(c, fileCode.Code, "")
 	}
 
 	c.JSON(consts.StatusOK, map[string]interface{}{

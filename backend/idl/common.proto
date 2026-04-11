@@ -30,6 +30,6 @@ service CommonService {
         option (api.get) = "/";
     }
     rpc Ping(EmptyReq) returns(PingResp) {
-        option (api.get) = "/api/v1/ping";
+        option (api.get) = "/v1/ping";
     }
 }

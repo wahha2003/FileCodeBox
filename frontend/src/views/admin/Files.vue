@@ -244,8 +244,7 @@ const deleteFile = async (file: any) => {
       }
     )
     
-    // 使用 code 而不是 ID
-    const res = await adminApi.deleteFileByCode(file.code)
+    const res = await adminApi.deleteFileById(file.id)
     if (res.code === 200) {
       ElMessage.success('删除成功')
       await fetchFiles()

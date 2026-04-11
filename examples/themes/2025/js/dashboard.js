@@ -168,7 +168,7 @@ const Dashboard = {
      */
     async loadUserInfo() {
         try {
-            const response = await fetch('/user/profile', {
+            const response = await fetch(buildApiUrl('/user/info'), {
                 headers: UserAuth.getAuthHeaders()
             });
             const result = await this.parseJsonSafe(response);
@@ -181,7 +181,7 @@ const Dashboard = {
                 console.log('[dashboard] 已获取并保存 user_info');
                 return userInfo;
             } else {
-                console.warn('[dashboard] /user/profile 返回结构非预期:', result);
+                console.warn('[dashboard] /user/info 返回结构非预期:', result);
                 return null;
             }
         } catch (error) {
@@ -313,7 +313,7 @@ const Dashboard = {
      */
     async loadDashboard() {
         try {
-            const response = await fetch('/user/stats', {
+            const response = await fetch(buildApiUrl('/user/stats'), {
                 headers: UserAuth.getAuthHeaders()
             });
             const result = await this.parseJsonSafe(response);
@@ -381,7 +381,7 @@ const Dashboard = {
      */
     async loadMyFiles(page = 1) {
         try {
-            const response = await fetch(`/user/files?page=${page}&page_size=${this.pageSize}`, {
+            const response = await fetch(buildApiUrl(`/user/files?page=${page}&page_size=${this.pageSize}`), {
                 headers: UserAuth.getAuthHeaders()
             });
             const result = await this.parseJsonSafe(response);
@@ -477,7 +477,7 @@ const Dashboard = {
                             <button class="btn-sm btn-info" onclick="Dashboard.copyCode('${file.code}')" title="复制提取码">
                                 📋 复制
                             </button>
-                            <a href="/share/download?code=${file.code}" class="btn-sm btn-success" title="下载文件">
+                            <a href="${buildApiDownloadUrl(file.code)}" class="btn-sm btn-success" title="下载文件">
                                 📥 下载
                             </a>
                             <button class="btn-sm btn-danger" onclick="Dashboard.deleteFile('${file.code}')" title="删除文件">
@@ -587,7 +587,7 @@ const Dashboard = {
      */
     async loadProfile() {
         try {
-            const response = await fetch('/user/profile', {
+            const response = await fetch(buildApiUrl('/user/info'), {
                 headers: UserAuth.getAuthHeaders()
             });
             const result = await this.parseJsonSafe(response);
@@ -603,7 +603,7 @@ const Dashboard = {
                     form.last_login_at.value = profile.last_login_at ? formatDateTime(profile.last_login_at) : '暂无数据';
                 }
             } else {
-                console.warn('[dashboard] /user/profile 返回非预期结果:', result);
+                console.warn('[dashboard] /user/info 返回非预期结果:', result);
             }
         } catch (error) {
             console.error('加载个人资料失败:', error);
@@ -650,7 +650,7 @@ const Dashboard = {
         }
         
         try {
-            const response = await fetch(`/user/files/${fileId}`, {
+            const response = await fetch(buildApiUrl(`/user/files/${fileId}`), {
                 method: 'DELETE',
                 headers: UserAuth.getAuthHeaders()
             });
@@ -692,7 +692,7 @@ const Dashboard = {
         }
 
         if (scopeNote) {
-            scopeNote.innerHTML = '🌐 生成的 API 密钥仅用于调用 <code>/api/v1</code> 路由（例如 <code>/api/v1/share/text</code>、<code>/api/v1/chunk/init</code>），请在请求头中携带 <code>X-API-Key</code>。更多示例见 <a href="/swagger/index.html" target="_blank" rel="noopener noreferrer">Swagger 文档</a>。';
+            scopeNote.innerHTML = `🌐 生成的 API 密钥可直接调用 <code>${escapeHtml(resolveApiBaseUrl())}/share/*</code> 与 <code>${escapeHtml(resolveApiBaseUrl())}/chunk/*</code> 路由，请在请求头中携带 <code>X-API-Key</code>。更多示例见 <a href="${buildSwaggerUrl()}" target="_blank" rel="noopener noreferrer">Swagger 文档</a>。`;
         }
 
         if (refreshBtn) {
@@ -792,7 +792,7 @@ const Dashboard = {
                 }
             }
 
-            const response = await fetch('/user/api-keys', {
+            const response = await fetch(buildApiUrl('/user/api-keys'), {
                 method: 'POST',
                 headers: UserAuth.getAuthHeaders(),
                 body: JSON.stringify(payload)
@@ -844,7 +844,7 @@ const Dashboard = {
         this.apiKeysLoading = true;
 
         try {
-            const response = await fetch('/user/api-keys', {
+            const response = await fetch(buildApiUrl('/user/api-keys'), {
                 headers: UserAuth.getAuthHeaders()
             });
             const result = await this.parseJsonSafe(response);
@@ -978,7 +978,7 @@ const Dashboard = {
         }
 
         try {
-            const response = await fetch(`/user/api-keys/${id}`, {
+            const response = await fetch(buildApiUrl(`/user/api-keys/${id}`), {
                 method: 'DELETE',
                 headers: UserAuth.getAuthHeaders()
             });
@@ -1243,7 +1243,7 @@ const Dashboard = {
                 throw new Error('网络错误');
             };
             
-            xhr.open('POST', '/share/file/');
+            xhr.open('POST', buildApiUrl('/share/file/'));
             xhr.setRequestHeader('Authorization', 'Bearer ' + UserAuth.getToken());
             xhr.send(formData);
             
@@ -1423,7 +1423,7 @@ const Dashboard = {
                 reject(new Error('网络错误'));
             };
             
-            xhr.open('POST', '/share/file/');
+            xhr.open('POST', buildApiUrl('/share/file/'));
             xhr.setRequestHeader('Authorization', 'Bearer ' + UserAuth.getToken());
             xhr.send(formData);
         });
@@ -1445,7 +1445,7 @@ const Dashboard = {
             };
             
             try {
-                const response = await fetch('/user/profile', {
+                const response = await fetch(buildApiUrl('/user/profile'), {
                     method: 'PUT',
                     headers: UserAuth.getAuthHeaders(),
                     body: JSON.stringify(data)
@@ -1495,7 +1495,7 @@ const Dashboard = {
             };
             
             try {
-                const response = await fetch('/user/change-password', {
+                const response = await fetch(buildApiUrl('/user/change-password'), {
                     method: 'POST',
                     headers: UserAuth.getAuthHeaders(),
                     body: JSON.stringify(data)

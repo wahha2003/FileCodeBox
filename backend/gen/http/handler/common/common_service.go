@@ -43,7 +43,7 @@ func Index(ctx context.Context, c *app.RequestContext) {
 }
 
 // Ping .
-// @router /api/v1/ping [GET]
+// @router /v1/ping [GET]
 func Ping(ctx context.Context, c *app.RequestContext) {
 	var err error
 	var req common.EmptyReq

@@ -19,10 +19,7 @@ func Register(r *server.Hertz) {
 	root := r.Group("/", rootMw()...)
 	root.GET("/", append(_indexMw(), common.Index)...)
 	{
-		_api := root.Group("/api", _apiMw()...)
-		{
-			_v1 := _api.Group("/v1", _v1Mw()...)
-			_v1.GET("/ping", append(_pingMw(), common.Ping)...)
-		}
+		_v1 := root.Group("/v1", _v1Mw()...)
+		_v1.GET("/ping", append(_pingMw(), common.Ping)...)
 	}
 }

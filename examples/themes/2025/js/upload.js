@@ -30,9 +30,7 @@ const FileUpload = {
      */
     async loadConfig() {
         try {
-            const response = await fetch('/', {
-                method: 'POST'
-            });
+            const response = await fetch(buildApiUrl('/config'));
             const result = await response.json();
             
             if (result.code === 200) {
@@ -387,7 +385,7 @@ const FileUpload = {
                         copyToClipboardAuto(shareCode);
                         
                         // 获取二维码数据
-                        const qrCodeData = result.data.qr_code_data || result.data.full_share_url || `${window.location.origin}/s/${shareCode}`;
+                        const qrCodeData = result.data.qr_code_data || result.data.full_share_url || buildPublicShareUrl(shareCode);
                         
                         setTimeout(() => {
                             showResult(`
@@ -429,7 +427,7 @@ const FileUpload = {
             
             // 发送请求
             xhr.timeout = 300000; // 5分钟超时
-            xhr.open('POST', '/share/file/');
+            xhr.open('POST', buildApiUrl('/share/file/'));
             
             // 添加认证头
             const token = UserAuth.getToken();
@@ -493,18 +491,14 @@ const FileUpload = {
      * 生成二维码
      * @param {string} data - 二维码数据
      */
-    generateQRCode(data) {
+    async generateQRCode(data) {
         const container = document.getElementById('qr-code-container');
         if (!container) return;
         
         // 显示加载状态
         container.innerHTML = '<div class="qr-loading">正在生成二维码...</div>';
         
-        // 调用后端API生成二维码
-        const qrUrl = `/api/qrcode/generate?data=${encodeURIComponent(data)}&size=200`;
-        
         const img = document.createElement('img');
-        img.src = qrUrl;
         img.alt = '二维码';
         img.style.maxWidth = '100%';
         img.style.height = 'auto';
@@ -521,5 +515,12 @@ const FileUpload = {
             console.error('二维码加载失败');
             container.innerHTML = '<div class="qr-error">二维码生成失败，请刷新重试</div>';
         };
+
+        try {
+            img.src = await generateQRCodeImageUrl(data, 200);
+        } catch (error) {
+            console.error('二维码生成失败', error);
+            container.innerHTML = '<div class="qr-error">二维码生成失败，请刷新重试</div>';
+        }
     }
 };

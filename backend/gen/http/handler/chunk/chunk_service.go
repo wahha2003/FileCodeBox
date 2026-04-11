@@ -18,6 +18,7 @@ import (
 	chunkmodel "github.com/zy84338719/fileCodeBox/backend/gen/http/model/chunk"
 	chunkService "github.com/zy84338719/fileCodeBox/backend/internal/app/chunk"
 	shareService "github.com/zy84338719/fileCodeBox/backend/internal/app/share"
+	"github.com/zy84338719/fileCodeBox/backend/internal/pkg/httpurl"
 	userService "github.com/zy84338719/fileCodeBox/backend/internal/app/user"
 	"github.com/zy84338719/fileCodeBox/backend/internal/pkg/utils"
 	"github.com/zy84338719/fileCodeBox/backend/internal/storage"
@@ -458,7 +459,7 @@ func ChunkUploadComplete(ctx context.Context, c *app.RequestContext) {
 	}
 
 	// 生成分享URL
-	fullShareURL := fmt.Sprintf("%s/share/%s", defaultBaseURL, shareResult.Code)
+	fullShareURL := httpurl.BuildPublicShareURL(c, shareResult.Code)
 
 	resp := &chunkmodel.ChunkUploadCompleteResp{
 		Code:    200,
