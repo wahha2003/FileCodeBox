@@ -7,6 +7,7 @@
       :show-file-list="false"
       drag
       class="upload-dragger"
+      :disabled="Boolean(uploadDisabledReason)"
     >
       <div class="upload-content">
         <div class="upload-icon">
@@ -18,10 +19,18 @@
         </div>
         <div class="upload-hint">
           <el-icon><InfoFilled /></el-icon>
-          支持所有常见文件格式，单文件最大 50MB
+          {{ uploadHintText }}
         </div>
       </div>
     </el-upload>
+
+    <el-alert
+      v-if="uploadDisabledReason"
+      type="warning"
+      :closable="false"
+      class="upload-alert"
+      :title="uploadDisabledReason"
+    />
 
     <transition name="fade">
       <div v-if="selectedFile" class="selected-file">
@@ -105,7 +114,7 @@
       size="large"
       class="upload-btn"
       :loading="uploading"
-      :disabled="!selectedFile"
+      :disabled="!selectedFile || Boolean(uploadDisabledReason)"
       @click="handleUpload"
     >
       <template #icon>
@@ -128,7 +137,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { shareApi } from '@/api/share'
 import { ElMessage } from 'element-plus'
 import { 
@@ -136,6 +145,9 @@ import {
   Lock, Upload 
 } from '@element-plus/icons-vue'
 import type { UploadFile } from 'element-plus'
+import { useConfigStore } from '@/stores/config'
+import { useUserStore } from '@/stores/user'
+import { formatFileSize } from '@/utils/fileSize'
 
 const emit = defineEmits<{
   success: [result: { code: string; share_url: string; full_share_url: string; qr_code_data: string; access_password?: string }]
@@ -145,6 +157,8 @@ const selectedFile = ref<File | null>(null)
 const uploading = ref(false)
 const uploadProgress = ref(0)
 const uploadStatusText = ref('')
+const configStore = useConfigStore()
+const userStore = useUserStore()
 
 const form = ref({
   expire_value: 1,
@@ -153,8 +167,53 @@ const form = ref({
   password: '',
 })
 
+const anonymousUploadLimit = computed(() => {
+  return Number(configStore.config?.uploadSize) || 10 * 1024 * 1024
+})
+
+const authenticatedUploadLimit = computed(() => {
+  return Number(configStore.config?.userUploadSize) || anonymousUploadLimit.value
+})
+
+const effectiveUploadLimit = computed(() => {
+  return userStore.isLoggedIn ? authenticatedUploadLimit.value : anonymousUploadLimit.value
+})
+
+const uploadDisabledReason = computed(() => {
+  if (!configStore.config) {
+    return ''
+  }
+  if (configStore.config.requireLogin === 1 && !userStore.isLoggedIn) {
+    return '当前系统要求登录后上传'
+  }
+  if (configStore.config.openUpload === 0 && !userStore.isLoggedIn) {
+    return '匿名上传已关闭，请先登录'
+  }
+  return ''
+})
+
+const uploadHintText = computed(() => {
+  if (uploadDisabledReason.value) {
+    return uploadDisabledReason.value
+  }
+  return `支持所有常见文件格式，当前单文件最大 ${formatFileSize(effectiveUploadLimit.value)}`
+})
+
 const handleFileChange = (file: UploadFile) => {
-  selectedFile.value = file.raw || null
+  if (uploadDisabledReason.value) {
+    selectedFile.value = null
+    ElMessage.warning(uploadDisabledReason.value)
+    return
+  }
+
+  const rawFile = file.raw || null
+  if (rawFile && effectiveUploadLimit.value > 0 && rawFile.size > effectiveUploadLimit.value) {
+    selectedFile.value = null
+    ElMessage.warning(`文件大小超过限制，当前最大 ${formatFileSize(effectiveUploadLimit.value)}`)
+    return
+  }
+
+  selectedFile.value = rawFile
 }
 
 const clearFile = () => {
@@ -165,14 +224,6 @@ const handleProtectionChange = (enabled: string | number | boolean) => {
   if (!enabled) {
     form.value.password = ''
   }
-}
-
-const formatFileSize = (bytes: number) => {
-  if (bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i]
 }
 
 const getFileType = (filename: string) => {
@@ -196,8 +247,18 @@ const getFileType = (filename: string) => {
 }
 
 const handleUpload = async () => {
+  if (uploadDisabledReason.value) {
+    ElMessage.warning(uploadDisabledReason.value)
+    return
+  }
+
   if (!selectedFile.value) {
     ElMessage.warning('请先选择文件')
+    return
+  }
+
+  if (effectiveUploadLimit.value > 0 && selectedFile.value.size > effectiveUploadLimit.value) {
+    ElMessage.warning(`文件大小超过限制，当前最大 ${formatFileSize(effectiveUploadLimit.value)}`)
     return
   }
 
@@ -246,6 +307,12 @@ const handleUpload = async () => {
     uploadProgress.value = 0
   }
 }
+
+onMounted(() => {
+  if (!configStore.loaded) {
+    configStore.fetchConfig()
+  }
+})
 </script>
 
 <style scoped>
@@ -320,6 +387,10 @@ const handleUpload = async () => {
   padding: 16px;
   background: #f0f2f5;
   border-radius: 12px;
+}
+
+.upload-alert {
+  margin-bottom: 24px;
 }
 
 .file-preview {

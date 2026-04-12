@@ -8,7 +8,9 @@ import (
 	"strings"
 	"time"
 
+	filecleanup "github.com/zy84338719/fileCodeBox/backend/internal/app/filecleanup"
 	"github.com/zy84338719/fileCodeBox/backend/internal/conf"
+	"github.com/zy84338719/fileCodeBox/backend/internal/pkg/accesspassword"
 	"github.com/zy84338719/fileCodeBox/backend/internal/pkg/utils"
 	"github.com/zy84338719/fileCodeBox/backend/internal/repo/db/dao"
 	"github.com/zy84338719/fileCodeBox/backend/internal/repo/db/model"
@@ -23,6 +25,7 @@ var (
 )
 
 const maxGenerateCodeAttempts = 64
+const textShareStorageType = "database"
 
 type ShareTextReq struct {
 	Text           string
@@ -78,6 +81,7 @@ type Service struct {
 	fileCodeRepo *dao.FileCodeRepository
 	userService  UserServiceInterface
 	storage      storage.StorageInterface
+	cleaner      *filecleanup.Service
 	baseURL      string // 基础 URL，用于生成分享链接
 }
 
@@ -88,12 +92,16 @@ type UserServiceInterface interface {
 
 func NewService(baseURL string, storageService storage.StorageInterface) *Service {
 	// 延迟初始化 repository，确保数据库已经准备好
-	return &Service{
+	service := &Service{
 		fileCodeRepo: nil, // 延迟初始化
 		userService:  nil,
 		storage:      storageService,
 		baseURL:      baseURL,
 	}
+	service.cleaner = filecleanup.NewService(func() storage.StorageInterface {
+		return service.storage
+	}, nil)
+	return service
 }
 
 // ensureRepository 确保repository已初始化
@@ -105,6 +113,9 @@ func (s *Service) ensureRepository() {
 
 func (s *Service) SetUserService(userService UserServiceInterface) {
 	s.userService = userService
+	if s.cleaner != nil {
+		s.cleaner.SetUserService(userService)
+	}
 }
 
 // GenerateCode 生成分享代码
@@ -213,7 +224,7 @@ func (s *Service) createFileCode(ctx context.Context, fileCode *model.FileCode) 
 func (s *Service) ShareText(ctx context.Context, req *ShareTextReq) (*ShareResp, error) {
 	s.ensureRepository()
 
-	accessPasswordHash, err := buildAccessPasswordHash(req.RequireAuth, req.AccessPassword)
+	accessPasswordHash, accessPasswordEnc, err := buildAccessPasswordCredentials(req.RequireAuth, req.AccessPassword)
 	if err != nil {
 		return nil, err
 	}
@@ -222,8 +233,10 @@ func (s *Service) ShareText(ctx context.Context, req *ShareTextReq) (*ShareResp,
 		Text:               req.Text,
 		ExpiredAt:          req.ExpiredAt,
 		ExpiredCount:       req.ExpiredCount,
+		StorageType:        textShareStorageType,
 		RequireAuth:        req.RequireAuth,
 		AccessPasswordHash: accessPasswordHash,
+		AccessPasswordEnc:  accessPasswordEnc,
 		UserID:             req.UserID,
 		UploadType:         req.UploadType,
 		OwnerIP:            req.OwnerIP,
@@ -285,7 +298,7 @@ func (s *Service) ShareFile(ctx context.Context, req *ShareFileReq) (*ShareResp,
 	if displayName == "" {
 		displayName = req.StoredName
 	}
-	accessPasswordHash, err := buildAccessPasswordHash(req.RequireAuth, req.AccessPassword)
+	accessPasswordHash, accessPasswordEnc, err := buildAccessPasswordCredentials(req.RequireAuth, req.AccessPassword)
 	if err != nil {
 		return nil, err
 	}
@@ -295,10 +308,12 @@ func (s *Service) ShareFile(ctx context.Context, req *ShareFileReq) (*ShareResp,
 		UUIDFileName:       req.StoredName,
 		Size:               req.Size,
 		Text:               displayName,
+		StorageType:        storage.DetectStorageType(s.storage),
 		ExpiredAt:          req.ExpiredAt,
 		ExpiredCount:       req.ExpiredCount,
 		RequireAuth:        req.RequireAuth,
 		AccessPasswordHash: accessPasswordHash,
+		AccessPasswordEnc:  accessPasswordEnc,
 		UserID:             req.UserID,
 		UploadType:         req.UploadType,
 		OwnerIP:            req.OwnerIP,
@@ -353,6 +368,9 @@ func (s *Service) GetFileByCode(ctx context.Context, code string) (*model.FileCo
 
 	// 检查文件是否过期
 	if fileCode.IsExpired() {
+		if s.cleaner != nil {
+			_, _ = s.cleaner.CleanupIfExpired(ctx, fileCode)
+		}
 		return nil, errors.New("file has expired")
 	}
 
@@ -369,19 +387,24 @@ func (s *Service) GetFilesByUserID(ctx context.Context, userID uint, page, pageS
 func (s *Service) DeleteFile(ctx context.Context, fileID uint, userID *uint) error {
 	s.ensureRepository()
 
+	var file *model.FileCode
+	var err error
+
 	// 如果指定了用户ID，验证文件所有权
 	if userID != nil {
-		file, err := s.fileCodeRepo.GetByUserID(ctx, *userID, fileID)
+		file, err = s.fileCodeRepo.GetByUserID(ctx, *userID, fileID)
 		if err != nil {
 			return err
 		}
-
-		// 更新用户统计（减少存储空间）
-		if s.userService != nil && userID != nil {
-			if err := s.userService.UpdateUserStats(*userID, "storage", -file.Size); err != nil {
-				// 记录错误但不影响主流程
-			}
+	} else {
+		file, err = s.fileCodeRepo.GetByID(ctx, fileID)
+		if err != nil {
+			return err
 		}
+	}
+
+	if s.cleaner != nil {
+		return s.cleaner.DeleteFileCode(ctx, file)
 	}
 
 	return s.fileCodeRepo.Delete(ctx, fileID)
@@ -402,30 +425,16 @@ func (s *Service) DeleteFileByCode(ctx context.Context, code string, userID uint
 		return fmt.Errorf("无权限删除此分享")
 	}
 
-	// 3. 如果是文件分享，删除物理文件
-	if file.FilePath != "" {
-		// 获取完整的文件路径
-		filePath := file.GetFilePath()
-
-		// 如果有存储服务，尝试删除物理文件
-		if s.storage != nil {
-			if err := s.storage.DeleteFile(ctx, filePath); err != nil {
-				// 记录错误但不阻止数据库删除
-				// 可以考虑添加日志记录
-			}
+	// 3. 删除数据库记录和物理文件
+	if s.cleaner != nil {
+		if err := s.cleaner.DeleteFileCode(ctx, file); err != nil {
+			return fmt.Errorf("删除分享记录失败: %w", err)
 		}
+		return nil
 	}
 
-	// 4. 删除数据库记录
 	if err := s.fileCodeRepo.Delete(ctx, file.ID); err != nil {
 		return fmt.Errorf("删除分享记录失败: %w", err)
-	}
-
-	// 5. 更新用户统计（减少存储空间）
-	if s.userService != nil {
-		if err := s.userService.UpdateUserStats(userID, "storage", -file.Size); err != nil {
-			// 记录错误但不影响主流程
-		}
 	}
 
 	return nil
@@ -504,21 +513,26 @@ func (s *Service) ValidateAccess(fileCode *model.FileCode, password string) erro
 	return nil
 }
 
-func buildAccessPasswordHash(requireAuth bool, accessPassword string) (string, error) {
+func buildAccessPasswordCredentials(requireAuth bool, accessPassword string) (string, string, error) {
 	if !requireAuth {
-		return "", nil
+		return "", "", nil
 	}
 
 	if strings.TrimSpace(accessPassword) == "" {
-		return "", ErrPasswordRequired
+		return "", "", ErrPasswordRequired
 	}
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(accessPassword), bcrypt.DefaultCost)
 	if err != nil {
-		return "", fmt.Errorf("failed to hash access password: %w", err)
+		return "", "", fmt.Errorf("failed to hash access password: %w", err)
 	}
 
-	return string(hashedPassword), nil
+	encryptedPassword, err := accesspassword.Encrypt(accessPassword)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to encrypt access password: %w", err)
+	}
+
+	return string(hashedPassword), encryptedPassword, nil
 }
 
 // modelToResp 将模型转换为响应

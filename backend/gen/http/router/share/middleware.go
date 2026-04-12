@@ -63,6 +63,7 @@ func _deleteshareMw() []app.HandlerFunc {
 }
 
 func _downloadfileMw() []app.HandlerFunc {
-	// your code...
-	return nil
+	return []app.HandlerFunc{
+		middleware.OptionalAuthMiddleware(),
+	}
 }

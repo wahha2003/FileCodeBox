@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
+	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/spf13/viper"
 	"github.com/zy84338719/fileCodeBox/backend/gen/http/router"
+	adminsvc "github.com/zy84338719/fileCodeBox/backend/internal/app/admin"
 	"github.com/zy84338719/fileCodeBox/backend/internal/conf"
 	"github.com/zy84338719/fileCodeBox/backend/internal/pkg/logger"
 	previewPkg "github.com/zy84338719/fileCodeBox/backend/internal/preview"
@@ -28,6 +31,7 @@ const (
 	defaultAdminEmail              = "admin@filecodebox.local"
 	defaultAdminNickname           = "Administrator"
 	legacyDefaultAdminPasswordHash = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZRGdjGj/n3.rsQ5pPjZ5yVlWK5WAe"
+	expiredFileProbeInterval       = 10 * time.Minute
 )
 
 func CORS() app.HandlerFunc {
@@ -63,6 +67,7 @@ func InitConfig(configPath string) (*Config, error) {
 	v := viper.New()
 	v.SetConfigFile(configPath)
 	v.SetConfigType("yaml")
+	conf.SetConfigFilePath(configPath)
 
 	v.SetDefault("server.host", "0.0.0.0")
 	v.SetDefault("server.port", 12345)
@@ -193,6 +198,9 @@ func repairLegacyDefaultAdmin(database *gorm.DB, admin *model.User) error {
 var (
 	database *gorm.DB
 	config   *Config
+
+	expiredCleanupCancel context.CancelFunc
+	expiredCleanupDone   chan struct{}
 )
 
 func Bootstrap() (*server.Hertz, error) {
@@ -229,12 +237,19 @@ func Bootstrap() (*server.Hertz, error) {
 		logger.Error("Failed to init preview service", zap.Error(err))
 	}
 
+	startExpiredFileCleanupWorker()
+
 	port := config.Server.Port
 	if port == 0 {
 		port = 12345
 	}
+
+	maxRequestBodySize := computeMaxRequestBodySize(config)
 	h := server.New(
 		server.WithHostPorts(fmt.Sprintf("%s:%d", config.Server.Host, port)),
+		server.WithMaxRequestBodySize(maxRequestBodySize),
+		server.WithReadTimeout(time.Duration(config.Server.ReadTimeout)*time.Second),
+		server.WithWriteTimeout(time.Duration(config.Server.WriteTimeout)*time.Second),
 	)
 
 	h.Use(CORS())
@@ -248,6 +263,7 @@ func Bootstrap() (*server.Hertz, error) {
 
 func Cleanup() {
 	logger.Info("Cleaning up resources...")
+	stopExpiredFileCleanupWorker()
 
 	if database != nil {
 		if err := db.Close(); err != nil {
@@ -274,4 +290,107 @@ func initPreviewService() error {
 	}
 
 	return previewPkg.InitService(previewConfig)
+}
+
+func computeMaxRequestBodySize(cfg *conf.AppConfiguration) int {
+	// Hertz defaults to 4MB, which is often smaller than this project's upload limits.
+	// Add some overhead for multipart boundaries/fields.
+	const multipartOverhead = 32 * 1024 * 1024 // 32MB
+
+	var uploadLimit int64
+	if cfg != nil {
+		uploadLimit = max64(cfg.Upload.UploadSize, cfg.Upload.ChunkSize)
+	}
+	if uploadLimit <= 0 {
+		uploadLimit = 10 * 1024 * 1024
+	}
+
+	requestLimit := uploadLimit + multipartOverhead
+	if requestLimit > int64(math.MaxInt) {
+		return math.MaxInt
+	}
+	return int(requestLimit)
+}
+
+func max64(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func startExpiredFileCleanupWorker() {
+	if expiredCleanupCancel != nil {
+		return
+	}
+
+	cleanupCtx, cancel := context.WithCancel(context.Background())
+	expiredCleanupCancel = cancel
+	expiredCleanupDone = make(chan struct{})
+
+	service := adminsvc.NewService()
+
+	go func() {
+		defer close(expiredCleanupDone)
+
+		probeAndCleanup := func() {
+			hasExpiredFiles, err := service.HasExpiredFiles(cleanupCtx)
+			if err != nil {
+				if cleanupCtx.Err() != nil {
+					return
+				}
+				logger.Error("Light probe for expired files failed", zap.Error(err))
+				return
+			}
+
+			if !hasExpiredFiles {
+				return
+			}
+
+			deletedCount, freedSpace, err := service.CleanExpiredFiles(cleanupCtx)
+			if err != nil {
+				if cleanupCtx.Err() != nil {
+					return
+				}
+				logger.Error("Auto cleanup of expired files failed", zap.Error(err))
+				return
+			}
+
+			if deletedCount > 0 {
+				logger.Info(
+					"Auto cleanup removed expired files",
+					zap.Int64("deleted_count", deletedCount),
+					zap.Int64("freed_space", freedSpace),
+				)
+			}
+		}
+
+		probeAndCleanup()
+
+		ticker := time.NewTicker(expiredFileProbeInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-cleanupCtx.Done():
+				return
+			case <-ticker.C:
+				probeAndCleanup()
+			}
+		}
+	}()
+}
+
+func stopExpiredFileCleanupWorker() {
+	if expiredCleanupCancel == nil {
+		return
+	}
+
+	expiredCleanupCancel()
+	if expiredCleanupDone != nil {
+		<-expiredCleanupDone
+	}
+
+	expiredCleanupCancel = nil
+	expiredCleanupDone = nil
 }

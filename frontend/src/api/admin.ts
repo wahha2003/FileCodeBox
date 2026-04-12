@@ -48,10 +48,21 @@ export const adminApi = {
       code: string
       file_name: string
       file_size: number
+      size?: number
       expire_time: string
+      expired_at?: string
       view_count: number
+      used_count?: number
       download_count: number
       created_at: string
+      user_id?: number
+      upload_type?: string
+      is_text_share?: boolean
+      storage_type?: string
+      storage_type_label?: string
+      require_auth?: boolean
+      access_password?: string
+      access_password_viewable?: boolean
     }>>({
       url: '/admin/files',
       method: 'GET',
@@ -211,6 +222,15 @@ export const adminApi = {
       url: '/admin/config',
       method: 'PUT',
       data: { config },
+    })
+  },
+
+  // 更新管理员账号密码
+  updateAccount: (data: { username?: string; old_password?: string; new_password?: string }) => {
+    return request<ApiResponse<void>>({
+      url: '/admin/account',
+      method: 'PUT',
+      data,
     })
   },
 

@@ -3,14 +3,18 @@ package share
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"github.com/zy84338719/fileCodeBox/backend/internal/conf"
 	"github.com/zy84338719/fileCodeBox/backend/internal/repo/db"
 	"github.com/zy84338719/fileCodeBox/backend/internal/repo/db/dao"
 	"github.com/zy84338719/fileCodeBox/backend/internal/repo/db/model"
+	"github.com/zy84338719/fileCodeBox/backend/internal/storage"
 	"gorm.io/gorm"
 )
 
@@ -166,5 +170,52 @@ func TestGetFileByCodeFallsBackToUppercaseLookupWhenConfigured(t *testing.T) {
 
 	if loaded.Code != "AB12" {
 		t.Fatalf("expected AB12, got %q", loaded.Code)
+	}
+}
+
+func TestGetFileByCodeCleansUpExpiredStoredFile(t *testing.T) {
+	setupTestDB(t)
+
+	dataPath := t.TempDir()
+	relativeDir := filepath.Join("uploads", "2026", "04", "12")
+	storedName := "expired.txt"
+	fullDir := filepath.Join(dataPath, relativeDir)
+	if err := os.MkdirAll(fullDir, 0o755); err != nil {
+		t.Fatalf("create upload dir: %v", err)
+	}
+
+	fullPath := filepath.Join(fullDir, storedName)
+	if err := os.WriteFile(fullPath, []byte("expired"), 0o644); err != nil {
+		t.Fatalf("write stored file: %v", err)
+	}
+
+	expiredAt := time.Now().Add(-time.Minute)
+	repo := dao.NewFileCodeRepository()
+	fileCode := &model.FileCode{
+		Code:         "9001",
+		FilePath:     relativeDir,
+		UUIDFileName: storedName,
+		Text:         "expired.txt",
+		Size:         int64(len("expired")),
+		ExpiredAt:    &expiredAt,
+		ExpiredCount: -1,
+	}
+	if err := repo.Create(context.Background(), fileCode); err != nil {
+		t.Fatalf("create expired share: %v", err)
+	}
+
+	storageService := storage.NewStorageService(&storage.StorageConfig{DataPath: dataPath})
+	svc := NewService("http://localhost", storageService)
+
+	if _, err := svc.GetFileByCode(context.Background(), fileCode.Code); err == nil {
+		t.Fatal("expected expired share lookup to fail")
+	}
+
+	if _, err := repo.GetByCode(context.Background(), fileCode.Code); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("expected expired share record to be deleted, got %v", err)
+	}
+
+	if _, err := os.Stat(fullPath); !os.IsNotExist(err) {
+		t.Fatalf("expected expired stored file to be deleted, got err=%v", err)
 	}
 }

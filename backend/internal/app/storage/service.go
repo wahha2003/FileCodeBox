@@ -11,8 +11,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const configFilePath = "configs/config.yaml"
-
 // Service 存储服务
 type Service struct {
 	config *conf.AppConfiguration
@@ -366,6 +364,7 @@ func (s *Service) persistStorageConfig() error {
 	s.refreshConfig()
 
 	rawConfig := make(map[string]interface{})
+	configFilePath := conf.GetConfigFilePath()
 	if content, err := os.ReadFile(configFilePath); err == nil {
 		if len(content) > 0 {
 			if err := yaml.Unmarshal(content, &rawConfig); err != nil {

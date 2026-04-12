@@ -5,8 +5,10 @@ export interface PublicConfig {
   name: string
   description: string
   uploadSize: number
+  userUploadSize: number
   enableChunk: number
   openUpload: number
+  requireLogin: number
   expireStyle: string[]
   shareCodeLength: number
   shareCodeCharset: string

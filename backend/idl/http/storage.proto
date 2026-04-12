@@ -37,6 +37,8 @@ message StorageConfig {
     WebDAVConfig webdav = 3 [(api.body) = "webdav"];
     S3Config s3 = 4 [(api.body) = "s3"];
     NFSConfig nfs = 5 [(api.body) = "nfs"];
+    QiniuConfig qiniu = 6 [(api.body) = "qiniu"];
+    UpyunConfig upyun = 7 [(api.body) = "upyun"];
 }
 
 message WebDAVConfig {
@@ -55,6 +57,24 @@ message S3Config {
     string region_name = 5 [(api.body) = "region_name"];
     string hostname = 6 [(api.body) = "hostname"];
     string proxy = 7 [(api.body) = "proxy"];
+}
+
+message QiniuConfig {
+    string access_key = 1 [(api.body) = "access_key"];
+    string secret_key = 2 [(api.body) = "secret_key"];
+    string bucket = 3 [(api.body) = "bucket"];
+    string domain = 4 [(api.body) = "domain"];
+    string region = 5 [(api.body) = "region"];
+    bool use_https = 6 [(api.body) = "use_https"];
+    bool private = 7 [(api.body) = "private"];
+}
+
+message UpyunConfig {
+    string bucket = 1 [(api.body) = "bucket"];
+    string operator = 2 [(api.body) = "operator"];
+    string password = 3 [(api.body) = "password"];
+    string domain = 4 [(api.body) = "domain"];
+    string secret = 5 [(api.body) = "secret"];
 }
 
 message NFSConfig {
@@ -116,6 +136,8 @@ message UpdateConfig {
     WebDAVConfig webdav = 2 [(api.body) = "webdav"];
     S3Config s3 = 3 [(api.body) = "s3"];
     NFSConfig nfs = 4 [(api.body) = "nfs"];
+    QiniuConfig qiniu = 5 [(api.body) = "qiniu"];
+    UpyunConfig upyun = 6 [(api.body) = "upyun"];
 }
 
 message UpdateStorageConfigResp {

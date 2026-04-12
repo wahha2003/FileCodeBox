@@ -175,6 +175,19 @@ message AdminUpdateConfigResp {
     string message = 2 [(api.body) = "message"];
 }
 
+// ==================== 更新管理员账号密码 ====================
+
+message AdminUpdateAccountReq {
+    string username = 1 [(api.body) = "username"];
+    string old_password = 2 [(api.body) = "old_password"];
+    string new_password = 3 [(api.body) = "new_password"];
+}
+
+message AdminUpdateAccountResp {
+    int32 code = 1 [(api.body) = "code"];
+    string message = 2 [(api.body) = "message"];
+}
+
 // ==================== 服务定义 ====================
 
 service AdminService {
@@ -216,5 +229,10 @@ service AdminService {
     // 更新系统配置
     rpc AdminUpdateConfig(AdminUpdateConfigReq) returns (AdminUpdateConfigResp) {
         option (api.put) = "/admin/config";
+    }
+    
+    // 更新管理员账号密码
+    rpc AdminUpdateAccount(AdminUpdateAccountReq) returns (AdminUpdateAccountResp) {
+        option (api.put) = "/admin/account";
     }
 }

@@ -22,15 +22,17 @@ type FileCode struct {
 	ExpiredCount int        `gorm:"default:0" json:"expired_count"`
 	UsedCount    int        `gorm:"default:0" json:"used_count"`
 
-	FileHash  string `gorm:"size:64" json:"file_hash"`
-	IsChunked bool   `gorm:"default:false" json:"is_chunked"`
-	UploadID  string `gorm:"size:36" json:"upload_id"`
+	FileHash    string `gorm:"size:64" json:"file_hash"`
+	IsChunked   bool   `gorm:"default:false" json:"is_chunked"`
+	UploadID    string `gorm:"size:36" json:"upload_id"`
+	StorageType string `gorm:"size:32" json:"storage_type"`
 
 	// 新增：用户认证相关字段
 	UserID             *uint  `gorm:"index" json:"user_id"`                           // 上传用户ID，为null表示匿名上传
 	UploadType         string `gorm:"size:20;default:'anonymous'" json:"upload_type"` // anonymous, authenticated
 	RequireAuth        bool   `gorm:"default:false" json:"require_auth"`              // 是否需要访问密码
 	AccessPasswordHash string `gorm:"size:255" json:"-"`                              // 访问密码哈希
+	AccessPasswordEnc  string `gorm:"type:text" json:"-"`                             // 加密保存的访问密码，仅管理员可查看
 	OwnerIP            string `gorm:"size:45" json:"owner_ip"`                        // 上传者IP地址
 }
 

@@ -13,8 +13,10 @@ type publicConfigData struct {
 	Name             string   `json:"name"`
 	Description      string   `json:"description"`
 	UploadSize       int64    `json:"uploadSize"`
+	UserUploadSize   int64    `json:"userUploadSize"`
 	EnableChunk      int      `json:"enableChunk"`
 	OpenUpload       int      `json:"openUpload"`
+	RequireLogin     int      `json:"requireLogin"`
 	ExpireStyle      []string `json:"expireStyle"`
 	ShareCodeLength  int      `json:"shareCodeLength"`
 	ShareCodeCharset string   `json:"shareCodeCharset"`
@@ -38,8 +40,10 @@ func getPublicConfig(ctx context.Context, c *app.RequestContext) {
 			Name:             firstNonEmpty(cfg.App.Name, "FileCodeBox"),
 			Description:      firstNonEmpty(cfg.App.Description, "安全、便捷的文件分享系统"),
 			UploadSize:       cfg.Upload.UploadSize,
+			UserUploadSize:   cfg.User.UserUploadSize,
 			EnableChunk:      boolToInt(cfg.Upload.EnableChunk),
 			OpenUpload:       boolToInt(cfg.Upload.OpenUpload),
+			RequireLogin:     boolToInt(cfg.Upload.RequireLogin),
 			ExpireStyle:      []string{"minute", "hour", "day", "week", "month", "year", "forever"},
 			ShareCodeLength:  shareCodeLength,
 			ShareCodeCharset: shareCodeCharset,

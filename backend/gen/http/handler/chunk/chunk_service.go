@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -21,6 +22,7 @@ import (
 	userService "github.com/zy84338719/fileCodeBox/backend/internal/app/user"
 	"github.com/zy84338719/fileCodeBox/backend/internal/conf"
 	"github.com/zy84338719/fileCodeBox/backend/internal/pkg/httpurl"
+	"github.com/zy84338719/fileCodeBox/backend/internal/pkg/uploadpolicy"
 	"github.com/zy84338719/fileCodeBox/backend/internal/pkg/utils"
 	"github.com/zy84338719/fileCodeBox/backend/internal/storage"
 )
@@ -53,6 +55,55 @@ func getShareService() *shareService.Service {
 	shareSvc := shareService.NewService(baseURL, getStorageService())
 	shareSvc.SetUserService(userSvc)
 	return shareSvc
+}
+
+func currentUploadUserID(c *app.RequestContext) *uint {
+	if c == nil {
+		return nil
+	}
+
+	if uid, exists := c.Get("user_id"); exists {
+		if parsedID, ok := uid.(uint); ok {
+			return &parsedID
+		}
+	}
+
+	return nil
+}
+
+func resolveUploadPolicy(ctx context.Context, c *app.RequestContext) (*uploadpolicy.Policy, error) {
+	return uploadpolicy.Resolve(ctx, currentUploadUserID(c))
+}
+
+func writeUploadPolicyError(c *app.RequestContext, err error) bool {
+	switch {
+	case errors.Is(err, uploadpolicy.ErrLoginRequired):
+		c.JSON(consts.StatusUnauthorized, map[string]interface{}{
+			"code":    401,
+			"message": "当前系统要求登录后上传",
+		})
+		return true
+	case errors.Is(err, uploadpolicy.ErrAnonymousUploadDisabled):
+		c.JSON(consts.StatusForbidden, map[string]interface{}{
+			"code":    403,
+			"message": "匿名上传已关闭，请先登录",
+		})
+		return true
+	case errors.Is(err, uploadpolicy.ErrChunkUploadDisabled):
+		c.JSON(consts.StatusForbidden, map[string]interface{}{
+			"code":    403,
+			"message": "分片上传已关闭",
+		})
+		return true
+	case errors.Is(err, uploadpolicy.ErrFileTooLarge), errors.Is(err, uploadpolicy.ErrStorageQuotaExceeded):
+		c.JSON(consts.StatusBadRequest, map[string]interface{}{
+			"code":    400,
+			"message": err.Error(),
+		})
+		return true
+	}
+
+	return false
 }
 
 // ChunkUploadInit .
@@ -88,6 +139,49 @@ func ChunkUploadInit(ctx context.Context, c *app.RequestContext) {
 		c.JSON(consts.StatusBadRequest, map[string]interface{}{
 			"code":    400,
 			"message": "分片大小必须大于0",
+		})
+		return
+	}
+
+	if err := uploadpolicy.EnsureChunkEnabled(); err != nil {
+		if writeUploadPolicyError(c, err) {
+			return
+		}
+		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
+			"code":    500,
+			"message": "校验分片配置失败: " + err.Error(),
+		})
+		return
+	}
+
+	policy, policyErr := resolveUploadPolicy(ctx, c)
+	if policyErr != nil {
+		if writeUploadPolicyError(c, policyErr) {
+			return
+		}
+		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
+			"code":    500,
+			"message": "校验上传配置失败: " + policyErr.Error(),
+		})
+		return
+	}
+	if err := policy.ValidateFileSize(req.FileSize); err != nil {
+		if writeUploadPolicyError(c, err) {
+			return
+		}
+		c.JSON(consts.StatusBadRequest, map[string]interface{}{
+			"code":    400,
+			"message": err.Error(),
+		})
+		return
+	}
+	if err := policy.ValidateStorageQuota(req.FileSize); err != nil {
+		if writeUploadPolicyError(c, err) {
+			return
+		}
+		c.JSON(consts.StatusBadRequest, map[string]interface{}{
+			"code":    400,
+			"message": err.Error(),
 		})
 		return
 	}
@@ -430,6 +524,49 @@ func ChunkUploadComplete(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 
+	if err := uploadpolicy.EnsureChunkEnabled(); err != nil {
+		if writeUploadPolicyError(c, err) {
+			return
+		}
+		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
+			"code":    500,
+			"message": "校验分片配置失败: " + err.Error(),
+		})
+		return
+	}
+
+	policy, policyErr := resolveUploadPolicy(ctx, c)
+	if policyErr != nil {
+		if writeUploadPolicyError(c, policyErr) {
+			return
+		}
+		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
+			"code":    500,
+			"message": "校验上传配置失败: " + policyErr.Error(),
+		})
+		return
+	}
+	if err := policy.ValidateFileSize(info.FileSize); err != nil {
+		if writeUploadPolicyError(c, err) {
+			return
+		}
+		c.JSON(consts.StatusBadRequest, map[string]interface{}{
+			"code":    400,
+			"message": err.Error(),
+		})
+		return
+	}
+	if err := policy.ValidateStorageQuota(info.FileSize); err != nil {
+		if writeUploadPolicyError(c, err) {
+			return
+		}
+		c.JSON(consts.StatusBadRequest, map[string]interface{}{
+			"code":    400,
+			"message": err.Error(),
+		})
+		return
+	}
+
 	// 检查所有分片是否已上传
 	uploadedIndexes, err := getChunkService().GetUploadedChunkIndexes(ctx, uploadID)
 	if err != nil {
@@ -515,12 +652,7 @@ func ChunkUploadComplete(ctx context.Context, c *app.RequestContext) {
 	expireCount := utils.CalculateExpireCount(req.ExpireStyle, int(req.ExpireValue))
 
 	// 获取用户ID（如果有）
-	var userID *uint
-	if uid, exists := c.Get("user_id"); exists {
-		if uidUint, ok := uid.(uint); ok {
-			userID = &uidUint
-		}
-	}
+	userID := currentUploadUserID(c)
 
 	// 获取客户端 IP
 	ownerIP := c.ClientIP()

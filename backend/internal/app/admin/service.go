@@ -7,10 +7,13 @@ import (
 	"strings"
 	"time"
 
+	filecleanup "github.com/zy84338719/fileCodeBox/backend/internal/app/filecleanup"
+	usersvc "github.com/zy84338719/fileCodeBox/backend/internal/app/user"
 	"github.com/zy84338719/fileCodeBox/backend/internal/conf"
 	"github.com/zy84338719/fileCodeBox/backend/internal/pkg/auth"
 	"github.com/zy84338719/fileCodeBox/backend/internal/repo/db/dao"
 	"github.com/zy84338719/fileCodeBox/backend/internal/repo/db/model"
+	"github.com/zy84338719/fileCodeBox/backend/internal/storage"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -49,17 +52,22 @@ type Service struct {
 	transferLogRepo    *dao.TransferLogRepository
 	adminOperationRepo *dao.AdminOperationLogRepository
 	chunkRepo          *dao.ChunkRepository
+	cleanupService     *filecleanup.Service
 	config             *SystemConfig
 }
 
 func NewService() *Service {
+	userService := usersvc.NewService()
 	return &Service{
 		userRepo:           dao.NewUserRepository(),
 		fileCodeRepo:       dao.NewFileCodeRepository(),
 		transferLogRepo:    dao.NewTransferLogRepository(),
 		adminOperationRepo: dao.NewAdminOperationLogRepository(),
 		chunkRepo:          dao.NewChunkRepository(),
-		config:             &SystemConfig{}, // 默认配置
+		cleanupService: filecleanup.NewService(func() storage.StorageInterface {
+			return storage.NewConfiguredStorage(conf.GetGlobalConfig(), "")
+		}, userService),
+		config: &SystemConfig{}, // 默认配置
 	}
 }
 
@@ -165,22 +173,8 @@ func (s *Service) GetTransferLogs(ctx context.Context, query model.TransferLogQu
 
 // CleanupExpiredFiles 清理过期文件
 func (s *Service) CleanupExpiredFiles(ctx context.Context) (int, error) {
-	// 获取过期文件
-	expiredFiles, err := s.fileCodeRepo.GetExpiredFiles(ctx)
-	if err != nil {
-		return 0, err
-	}
-
-	// 删除过期文件
-	deletedCount, err := s.fileCodeRepo.DeleteExpiredFiles(ctx, expiredFiles)
-	if err != nil {
-		return 0, err
-	}
-
-	// TODO: 记录管理员操作日志
-	// s.logAdminOperation(ctx, "maintenance.clean_expired_files", fmt.Sprintf("Cleaned up %d expired files", deletedCount), true)
-
-	return deletedCount, nil
+	deletedCount, _, err := s.cleanupService.CleanupExpiredFiles(ctx)
+	return int(deletedCount), err
 }
 
 // CleanupIncompleteUploads 清理未完成的上传
@@ -308,27 +302,12 @@ func (s *Service) GenerateTokenForAdmin(ctx context.Context, username, password 
 
 // CleanExpiredFiles 清理过期文件
 func (s *Service) CleanExpiredFiles(ctx context.Context) (int64, int64, error) {
-	// 获取过期文件
-	expiredFiles, err := s.fileCodeRepo.GetExpiredFiles(ctx)
-	if err != nil {
-		return 0, 0, err
-	}
+	return s.cleanupService.CleanupExpiredFiles(ctx)
+}
 
-	// 删除过期文件并计算释放的空间
-	deletedCount := int64(0)
-	freedSpace := int64(0)
-	for _, file := range expiredFiles {
-		freedSpace += file.Size
-	}
-
-	// 删除数据库记录
-	count, err := s.fileCodeRepo.DeleteExpiredFiles(ctx, expiredFiles)
-	if err != nil {
-		return deletedCount, 0, err
-	}
-	deletedCount = int64(count)
-
-	return deletedCount, freedSpace, nil
+// HasExpiredFiles 使用轻量查询判断是否需要进入真正清理。
+func (s *Service) HasExpiredFiles(ctx context.Context) (bool, error) {
+	return s.cleanupService.HasExpiredFiles(ctx)
 }
 
 // CleanTempFiles 清理临时文件

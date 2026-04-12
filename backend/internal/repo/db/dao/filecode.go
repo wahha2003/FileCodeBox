@@ -126,6 +126,22 @@ func (r *FileCodeRepository) GetExpiredFiles(ctx context.Context) ([]*model.File
 	return expiredFiles, err
 }
 
+func (r *FileCodeRepository) HasExpiredFiles(ctx context.Context) (bool, error) {
+	var fileCode model.FileCode
+	err := r.db().WithContext(ctx).
+		Select("id").
+		Where("(expired_at IS NOT NULL AND expired_at < ?) OR expired_count = 0", time.Now()).
+		Limit(1).
+		Take(&fileCode).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 func (r *FileCodeRepository) DeleteExpiredFiles(ctx context.Context, expiredFiles []*model.FileCode) (int, error) {
 	if len(expiredFiles) == 0 {
 		return 0, nil

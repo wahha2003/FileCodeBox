@@ -1,5 +1,13 @@
 <template>
   <div class="text-share-container">
+    <el-alert
+      v-if="uploadDisabledReason"
+      type="warning"
+      :closable="false"
+      class="share-alert"
+      :title="uploadDisabledReason"
+    />
+
     <div class="text-input-area">
       <el-input
         v-model="textContent"
@@ -70,7 +78,7 @@
       size="large"
       class="share-btn"
       :loading="sharing"
-      :disabled="!textContent.trim()"
+      :disabled="!textContent.trim() || Boolean(uploadDisabledReason)"
       @click="handleShare"
     >
       <template #icon>
@@ -82,10 +90,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { shareApi } from '@/api/share'
 import { ElMessage } from 'element-plus'
 import { Clock, Lock, Promotion } from '@element-plus/icons-vue'
+import { useConfigStore } from '@/stores/config'
+import { useUserStore } from '@/stores/user'
 
 const emit = defineEmits<{
   success: [result: { code: string; share_url: string; full_share_url: string; qr_code_data: string; access_password?: string }]
@@ -93,12 +103,27 @@ const emit = defineEmits<{
 
 const textContent = ref('')
 const sharing = ref(false)
+const configStore = useConfigStore()
+const userStore = useUserStore()
 
 const form = ref({
   expire_value: 1,
   expire_style: 'day',
   require_auth: false,
   password: '',
+})
+
+const uploadDisabledReason = computed(() => {
+  if (!configStore.config) {
+    return ''
+  }
+  if (configStore.config.requireLogin === 1 && !userStore.isLoggedIn) {
+    return '当前系统要求登录后上传'
+  }
+  if (configStore.config.openUpload === 0 && !userStore.isLoggedIn) {
+    return '匿名上传已关闭，请先登录'
+  }
+  return ''
 })
 
 const handleProtectionChange = (enabled: string | number | boolean) => {
@@ -108,6 +133,11 @@ const handleProtectionChange = (enabled: string | number | boolean) => {
 }
 
 const handleShare = async () => {
+  if (uploadDisabledReason.value) {
+    ElMessage.warning(uploadDisabledReason.value)
+    return
+  }
+
   if (!textContent.value.trim()) {
     ElMessage.warning('请输入文本内容')
     return
@@ -150,6 +180,12 @@ const handleShare = async () => {
     sharing.value = false
   }
 }
+
+onMounted(() => {
+  if (!configStore.loaded) {
+    configStore.fetchConfig()
+  }
+})
 </script>
 
 <style scoped>
@@ -158,6 +194,10 @@ const handleShare = async () => {
 }
 
 .text-input-area {
+  margin-bottom: 24px;
+}
+
+.share-alert {
   margin-bottom: 24px;
 }
 

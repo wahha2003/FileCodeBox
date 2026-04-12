@@ -10,6 +10,19 @@ const (
 	defaultLocalDataPath = "./data"
 )
 
+func DetectStorageType(storageSvc StorageInterface) string {
+	switch storageSvc.(type) {
+	case *S3Storage:
+		return string(StorageTypeS3)
+	case *QiniuStorage:
+		return string(StorageTypeQiniu)
+	case *UpyunStorage:
+		return string(StorageTypeUpyun)
+	default:
+		return string(StorageTypeLocal)
+	}
+}
+
 // BuildStorageConfigFromAppConfig 将应用配置转换为存储配置。
 func BuildStorageConfigFromAppConfig(cfg *conf.AppConfiguration, fallbackBaseURL string) *StorageConfig {
 	storageCfg := &StorageConfig{
@@ -31,8 +44,8 @@ func BuildStorageConfigFromAppConfig(cfg *conf.AppConfiguration, fallbackBaseURL
 	if strings.TrimSpace(cfg.Storage.StoragePath) != "" {
 		storageCfg.DataPath = strings.TrimSpace(cfg.Storage.StoragePath)
 	}
-	if strings.TrimSpace(cfg.Storage.Type) != "" {
-		storageCfg.Type = StorageType(strings.ToLower(strings.TrimSpace(cfg.Storage.Type)))
+	if normalizedType, ok := normalizeConfiguredStorageType(cfg.Storage.Type); ok {
+		storageCfg.Type = normalizedType
 	}
 
 	// S3 配置
@@ -66,8 +79,18 @@ func BuildStorageConfigFromAppConfig(cfg *conf.AppConfiguration, fallbackBaseURL
 
 // NewConfiguredStorage 根据应用配置创建实际存储实例。
 func NewConfiguredStorage(cfg *conf.AppConfiguration, fallbackBaseURL string) StorageInterface {
-	storageCfg := BuildStorageConfigFromAppConfig(cfg, fallbackBaseURL)
+	return NewConfiguredStorageWithType(cfg, "", fallbackBaseURL)
+}
 
+func NewConfiguredStorageWithType(cfg *conf.AppConfiguration, forcedType, fallbackBaseURL string) StorageInterface {
+	storageCfg := BuildStorageConfigFromAppConfig(cfg, fallbackBaseURL)
+	if normalizedType, ok := normalizeConfiguredStorageType(forcedType); ok {
+		storageCfg.Type = normalizedType
+	}
+	return newConfiguredStorage(storageCfg)
+}
+
+func newConfiguredStorage(storageCfg *StorageConfig) StorageInterface {
 	switch storageCfg.Type {
 	case StorageTypeS3:
 		return NewS3Storage(storageCfg)
@@ -80,3 +103,21 @@ func NewConfiguredStorage(cfg *conf.AppConfiguration, fallbackBaseURL string) St
 	}
 }
 
+func normalizeConfiguredStorageType(storageType string) (StorageType, bool) {
+	switch strings.ToLower(strings.TrimSpace(storageType)) {
+	case string(StorageTypeLocal):
+		return StorageTypeLocal, true
+	case string(StorageTypeS3):
+		return StorageTypeS3, true
+	case string(StorageTypeQiniu):
+		return StorageTypeQiniu, true
+	case string(StorageTypeUpyun):
+		return StorageTypeUpyun, true
+	case string(StorageTypeWebDAV):
+		return StorageTypeWebDAV, true
+	case string(StorageTypeOneDrive):
+		return StorageTypeOneDrive, true
+	default:
+		return "", false
+	}
+}

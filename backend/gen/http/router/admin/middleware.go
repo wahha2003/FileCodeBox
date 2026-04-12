@@ -28,6 +28,11 @@ func _adminupdateconfigMw() []app.HandlerFunc {
 	return nil
 }
 
+func _adminupdateaccountMw() []app.HandlerFunc {
+	// your code...
+	return nil
+}
+
 func _filesMw() []app.HandlerFunc {
 	// your code...
 	return nil

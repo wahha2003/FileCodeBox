@@ -41,30 +41,14 @@ func GetStorageInfo(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 
-	// 转换为响应格式
-	storageDetails := make(map[string]*storage.StorageDetail)
-	for k, v := range info.StorageDetails {
-		storageDetails[k] = &storage.StorageDetail{
-			Type:         v.Type,
-			Available:    v.Available,
-			StoragePath:  v.StoragePath,
-			UsagePercent: v.UsagePercent,
-		}
-		storageDetails[k].Error = v.Error
-	}
-
-	resp := &storage.GetStorageInfoResp{
-		Code:    200,
-		Message: "获取成功",
-		Data: &storage.StorageInfoData{
-			Current:        info.Current,
-			Available:      info.Available,
-			StorageDetails: storageDetails,
-			StorageConfig:  convertToProtoStorageConfig(info.StorageConfig),
-		},
-	}
-
-	c.JSON(consts.StatusOK, resp)
+	// NOTE: The generated proto model does not include qiniu/upyun fields yet.
+	// Return the service-layer payload directly so the admin UI can save and refill
+	// all storage configs consistently.
+	c.JSON(consts.StatusOK, map[string]interface{}{
+		"code":    200,
+		"message": "获取成功",
+		"data":    info,
+	})
 }
 
 // SwitchStorage .
@@ -150,20 +134,20 @@ func TestStorageConnection(ctx context.Context, c *app.RequestContext) {
 // @router /admin/storage/config [PUT]
 func UpdateStorageConfig(ctx context.Context, c *app.RequestContext) {
 	var err error
-	var req storage.UpdateStorageConfigReq
-	err = c.BindAndValidate(&req)
+	var req updateStorageConfigPayload
+	err = c.Bind(&req)
 	if err != nil {
-		c.JSON(consts.StatusBadRequest, &storage.UpdateStorageConfigResp{
-			Code:    400,
-			Message: "请求参数错误: " + err.Error(),
+		c.JSON(consts.StatusBadRequest, map[string]interface{}{
+			"code":    400,
+			"message": "请求参数错误: " + err.Error(),
 		})
 		return
 	}
 
 	if req.Type == "" {
-		c.JSON(consts.StatusBadRequest, &storage.UpdateStorageConfigResp{
-			Code:    400,
-			Message: "存储类型不能为空",
+		c.JSON(consts.StatusBadRequest, map[string]interface{}{
+			"code":    400,
+			"message": "存储类型不能为空",
 		})
 		return
 	}
@@ -174,26 +158,40 @@ func UpdateStorageConfig(ctx context.Context, c *app.RequestContext) {
 	}
 	if req.Config != nil {
 		updateReq.Config.StoragePath = req.Config.StoragePath
-		updateReq.Config.WebDAV = convertFromProtoWebDAVConfig(req.Config.Webdav)
-		updateReq.Config.S3 = convertFromProtoS3Config(req.Config.S3)
-		updateReq.Config.NFS = convertFromProtoNFSConfig(req.Config.Nfs)
+		updateReq.Config.WebDAV = req.Config.WebDAV
+		updateReq.Config.S3 = req.Config.S3
+		updateReq.Config.Qiniu = req.Config.Qiniu
+		updateReq.Config.Upyun = req.Config.Upyun
+		updateReq.Config.NFS = req.Config.NFS
 	}
 
 	// 更新存储配置
 	if err := storageService.UpdateStorageConfig(ctx, updateReq); err != nil {
-		c.JSON(consts.StatusInternalServerError, &storage.UpdateStorageConfigResp{
-			Code:    500,
-			Message: "配置更新失败: " + err.Error(),
+		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
+			"code":    500,
+			"message": "配置更新失败: " + err.Error(),
 		})
 		return
 	}
 
-	resp := &storage.UpdateStorageConfigResp{
-		Code:    200,
-		Message: "存储配置更新成功",
-	}
+	c.JSON(consts.StatusOK, map[string]interface{}{
+		"code":    200,
+		"message": "存储配置更新成功",
+	})
+}
 
-	c.JSON(consts.StatusOK, resp)
+type updateStorageConfigPayload struct {
+	Type   string                   `json:"type"`
+	Config *updateStorageConfigBody `json:"config"`
+}
+
+type updateStorageConfigBody struct {
+	StoragePath string                   `json:"storage_path"`
+	WebDAV      *storagesvc.WebDAVConfig `json:"webdav"`
+	S3          *storagesvc.S3Config     `json:"s3"`
+	Qiniu       *storagesvc.QiniuConfig  `json:"qiniu"`
+	Upyun       *storagesvc.UpyunConfig  `json:"upyun"`
+	NFS         *storagesvc.NFSConfig    `json:"nfs"`
 }
 
 // ==================== 转换函数 ====================

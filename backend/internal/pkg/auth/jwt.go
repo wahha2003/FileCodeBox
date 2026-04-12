@@ -2,9 +2,11 @@ package auth
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/zy84338719/fileCodeBox/backend/internal/conf"
 )
 
 var (
@@ -23,25 +25,30 @@ type Claims struct {
 
 // GenerateToken 生成 JWT token
 func GenerateToken(userID uint, username, role string) (string, error) {
+	expiryHours := 24 * 7
+	if cfg := conf.GetGlobalConfig(); cfg != nil && cfg.User.SessionExpiryHours > 0 {
+		expiryHours = cfg.User.SessionExpiryHours
+	}
+
 	claims := &Claims{
 		UserID:   userID,
 		Username: username,
 		Role:     role,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour * 7)), // 7天过期
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Duration(expiryHours) * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			Issuer:    "FileCodeBox",
 		},
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(jwtSecret)
+	return token.SignedString(currentJWTSecret())
 }
 
 // ParseToken 解析 JWT token
 func ParseToken(tokenString string) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
-		return jwtSecret, nil
+		return currentJWTSecret(), nil
 	})
 
 	if err != nil {
@@ -77,4 +84,13 @@ func GenerateAdminToken(userID uint, username string) (string, error) {
 // SetJWTSecret 设置 JWT secret（从配置文件）
 func SetJWTSecret(secret string) {
 	jwtSecret = []byte(secret)
+}
+
+func currentJWTSecret() []byte {
+	if cfg := conf.GetGlobalConfig(); cfg != nil {
+		if secret := strings.TrimSpace(cfg.User.JWTSecret); secret != "" {
+			return []byte(secret)
+		}
+	}
+	return jwtSecret
 }

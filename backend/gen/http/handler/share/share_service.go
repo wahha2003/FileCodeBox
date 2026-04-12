@@ -22,6 +22,7 @@ import (
 	"github.com/zy84338719/fileCodeBox/backend/internal/conf"
 	"github.com/zy84338719/fileCodeBox/backend/internal/pkg/httpurl"
 	"github.com/zy84338719/fileCodeBox/backend/internal/pkg/sharetoken"
+	"github.com/zy84338719/fileCodeBox/backend/internal/pkg/uploadpolicy"
 	"github.com/zy84338719/fileCodeBox/backend/internal/pkg/utils"
 	"github.com/zy84338719/fileCodeBox/backend/internal/repo/db/dao"
 	dbmodel "github.com/zy84338719/fileCodeBox/backend/internal/repo/db/model"
@@ -33,13 +34,20 @@ var transferLogRepo = dao.NewTransferLogRepository()
 
 // 配置常量（应从配置读取，这里使用默认值）
 const (
-	defaultMaxUploadSize = 10485760 // 10MB
-	defaultBaseURL       = "http://localhost:12345"
-	shareAccessTokenTTL  = 12 * time.Hour
+	defaultBaseURL      = "http://localhost:12345"
+	shareAccessTokenTTL = 12 * time.Hour
 )
 
 func getStorageService() storage.StorageInterface {
 	return storage.NewConfiguredStorage(conf.GetGlobalConfig(), defaultBaseURL)
+}
+
+func getStorageServiceForFile(fileCode *dbmodel.FileCode) storage.StorageInterface {
+	storageType := ""
+	if fileCode != nil {
+		storageType = strings.TrimSpace(fileCode.StorageType)
+	}
+	return storage.NewConfiguredStorageWithType(conf.GetGlobalConfig(), storageType, defaultBaseURL)
 }
 
 func getShareService() *shareService.Service {
@@ -197,6 +205,20 @@ func issueShareAccessCookie(c *app.RequestContext, fileCode *dbmodel.FileCode) e
 	return nil
 }
 
+func isAdminShareAccess(c *app.RequestContext) bool {
+	if c == nil {
+		return false
+	}
+
+	role, exists := c.Get("role")
+	if !exists {
+		return false
+	}
+
+	roleValue, ok := role.(string)
+	return ok && strings.TrimSpace(roleValue) == "admin"
+}
+
 func authorizeShareAccess(c *app.RequestContext, fileCode *dbmodel.FileCode, password string) error {
 	if fileCode == nil || !fileCode.RequireAuth {
 		return nil
@@ -208,6 +230,10 @@ func authorizeShareAccess(c *app.RequestContext, fileCode *dbmodel.FileCode, pas
 			return nil
 		}
 		clearShareAccessCookie(c, fileCode.Code)
+	}
+
+	if isAdminShareAccess(c) {
+		return issueShareAccessCookie(c, fileCode)
 	}
 
 	if err := getShareService().ValidateAccess(fileCode, password); err != nil {
@@ -252,6 +278,49 @@ func recordTransferLog(ctx context.Context, c *app.RequestContext, operation str
 	})
 }
 
+func currentUploadUserID(c *app.RequestContext) *uint {
+	if c == nil {
+		return nil
+	}
+
+	if uid, exists := c.Get("user_id"); exists {
+		if parsedID, ok := uid.(uint); ok {
+			return &parsedID
+		}
+	}
+
+	return nil
+}
+
+func resolveUploadPolicy(ctx context.Context, c *app.RequestContext) (*uploadpolicy.Policy, error) {
+	return uploadpolicy.Resolve(ctx, currentUploadUserID(c))
+}
+
+func writeUploadPolicyError(c *app.RequestContext, err error) bool {
+	switch {
+	case errors.Is(err, uploadpolicy.ErrLoginRequired):
+		c.JSON(consts.StatusUnauthorized, map[string]interface{}{
+			"code":    401,
+			"message": "当前系统要求登录后上传",
+		})
+		return true
+	case errors.Is(err, uploadpolicy.ErrAnonymousUploadDisabled):
+		c.JSON(consts.StatusForbidden, map[string]interface{}{
+			"code":    403,
+			"message": "匿名上传已关闭，请先登录",
+		})
+		return true
+	case errors.Is(err, uploadpolicy.ErrFileTooLarge), errors.Is(err, uploadpolicy.ErrStorageQuotaExceeded):
+		c.JSON(consts.StatusBadRequest, map[string]interface{}{
+			"code":    400,
+			"message": err.Error(),
+		})
+		return true
+	}
+
+	return false
+}
+
 // ShareText .
 // @router /share/text/ [POST]
 func ShareText(ctx context.Context, c *app.RequestContext) {
@@ -286,13 +355,19 @@ func ShareText(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 
-	// 获取用户ID（如果有）
-	var userID *uint
-	if uid, exists := c.Get("user_id"); exists {
-		if uidUint, ok := uid.(uint); ok {
-			userID = &uidUint
+	if _, err := resolveUploadPolicy(ctx, c); err != nil {
+		if writeUploadPolicyError(c, err) {
+			return
 		}
+		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
+			"code":    500,
+			"message": "校验上传配置失败: " + err.Error(),
+		})
+		return
 	}
+
+	// 获取用户ID（如果有）
+	userID := currentUploadUserID(c)
 
 	// 获取客户端 IP
 	ownerIP := c.ClientIP()
@@ -360,6 +435,18 @@ func ShareFile(ctx context.Context, c *app.RequestContext) {
 		expireValue = 1
 	}
 
+	policy, policyErr := resolveUploadPolicy(ctx, c)
+	if policyErr != nil {
+		if writeUploadPolicyError(c, policyErr) {
+			return
+		}
+		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
+			"code":    500,
+			"message": "校验上传配置失败: " + policyErr.Error(),
+		})
+		return
+	}
+
 	// 2. 获取上传文件
 	file, err := c.FormFile("file")
 	if err != nil {
@@ -371,10 +458,23 @@ func ShareFile(ctx context.Context, c *app.RequestContext) {
 	}
 
 	// 3. 检查文件大小
-	if file.Size > defaultMaxUploadSize {
+	if err := policy.ValidateFileSize(file.Size); err != nil {
+		if writeUploadPolicyError(c, err) {
+			return
+		}
 		c.JSON(consts.StatusBadRequest, map[string]interface{}{
 			"code":    400,
-			"message": fmt.Sprintf("文件大小超过限制（最大 %d MB）", defaultMaxUploadSize/1024/1024),
+			"message": err.Error(),
+		})
+		return
+	}
+	if err := policy.ValidateStorageQuota(file.Size); err != nil {
+		if writeUploadPolicyError(c, err) {
+			return
+		}
+		c.JSON(consts.StatusBadRequest, map[string]interface{}{
+			"code":    400,
+			"message": err.Error(),
 		})
 		return
 	}
@@ -410,12 +510,7 @@ func ShareFile(ctx context.Context, c *app.RequestContext) {
 	expireCount := utils.CalculateExpireCount(expireStyle, expireValue)
 
 	// 8. 获取用户ID（如果有）
-	var userID *uint
-	if uid, exists := c.Get("user_id"); exists {
-		if uidUint, ok := uid.(uint); ok {
-			userID = &uidUint
-		}
-	}
+	userID := currentUploadUserID(c)
 
 	// 9. 获取客户端 IP
 	ownerIP := c.ClientIP()
@@ -736,7 +831,7 @@ func DownloadFile(ctx context.Context, c *app.RequestContext) {
 	}
 
 	// 获取文件读取器
-	reader, fileSize, err := getStorageService().GetFileReader(ctx, filePath)
+	reader, fileSize, err := getStorageServiceForFile(fileCode).GetFileReader(ctx, filePath)
 	if err != nil {
 		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
 			"code":    500,

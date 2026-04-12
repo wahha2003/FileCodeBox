@@ -7,6 +7,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"path"
 	"strings"
 	"time"
 
@@ -84,19 +85,12 @@ func (s *QiniuStorage) SaveFile(ctx context.Context, file *multipart.FileHeader,
 	defer src.Close()
 
 	key := s.normalizeKey(savePath)
-	objectName := key
-
-	putPolicy, err := uptoken.NewPutPolicy(s.config.QiniuBucket, time.Now().Add(time.Hour))
+	objectOptions, err := s.newUploadObjectOptions(key, file.Filename, file.Header.Get("Content-Type"), time.Hour)
 	if err != nil {
-		return nil, fmt.Errorf("创建上传策略失败: %w", err)
+		return nil, err
 	}
-	signer := uptoken.NewSigner(putPolicy, s.cred)
 
-	err = s.uploadMgr.UploadReader(ctx, src, &uploader.ObjectOptions{
-		BucketName: s.config.QiniuBucket,
-		ObjectName: &objectName,
-		UpToken:    signer,
-	}, nil)
+	err = s.uploadMgr.UploadReader(ctx, src, objectOptions, nil)
 	if err != nil {
 		return nil, fmt.Errorf("上传文件到七牛云失败: %w", err)
 	}
@@ -141,19 +135,12 @@ func (s *QiniuStorage) SaveChunk(ctx context.Context, uploadID string, chunkInde
 	}
 
 	key := fmt.Sprintf("chunks/%s/%d.part", uploadID, chunkIndex)
-	objectName := key
-
-	putPolicy, err := uptoken.NewPutPolicy(s.config.QiniuBucket, time.Now().Add(time.Hour))
+	objectOptions, err := s.newUploadObjectOptions(key, "", "application/octet-stream", time.Hour)
 	if err != nil {
-		return fmt.Errorf("创建上传策略失败: %w", err)
+		return err
 	}
-	signer := uptoken.NewSigner(putPolicy, s.cred)
 
-	err = s.uploadMgr.UploadReader(ctx, bytes.NewReader(data), &uploader.ObjectOptions{
-		BucketName: s.config.QiniuBucket,
-		ObjectName: &objectName,
-		UpToken:    signer,
-	}, nil)
+	err = s.uploadMgr.UploadReader(ctx, bytes.NewReader(data), objectOptions, nil)
 	if err != nil {
 		return fmt.Errorf("保存分片到七牛云失败: %w", err)
 	}
@@ -188,19 +175,12 @@ func (s *QiniuStorage) MergeChunks(ctx context.Context, uploadID string, totalCh
 	}()
 
 	key := s.normalizeKey(savePath)
-	objectName := key
-
-	putPolicy, err := uptoken.NewPutPolicy(s.config.QiniuBucket, time.Now().Add(2*time.Hour))
+	objectOptions, err := s.newUploadObjectOptions(key, "", "", 2*time.Hour)
 	if err != nil {
-		return fmt.Errorf("创建上传策略失败: %w", err)
+		return err
 	}
-	signer := uptoken.NewSigner(putPolicy, s.cred)
 
-	uploadErr := s.uploadMgr.UploadReader(ctx, pipeReader, &uploader.ObjectOptions{
-		BucketName: s.config.QiniuBucket,
-		ObjectName: &objectName,
-		UpToken:    signer,
-	}, nil)
+	uploadErr := s.uploadMgr.UploadReader(ctx, pipeReader, objectOptions, nil)
 
 	streamErr := <-errCh
 	if uploadErr != nil {
@@ -242,26 +222,19 @@ func (s *QiniuStorage) GetFileSize(ctx context.Context, filePath string) (int64,
 }
 
 func (s *QiniuStorage) GetFileURL(ctx context.Context, filePath string) (string, error) {
-	domain := strings.TrimSpace(s.config.QiniuDomain)
-	if domain == "" {
-		return "", fmt.Errorf("七牛云 CDN 域名未配置")
-	}
-
 	key := s.normalizeKey(filePath)
-	scheme := "https"
-	if !s.config.QiniuUseHTTPS {
-		scheme = "http"
+	baseURL, err := s.getDownloadBaseURL()
+	if err != nil {
+		return "", err
 	}
-
-	rawURL := fmt.Sprintf("%s://%s/%s", scheme, domain, key)
 
 	// 私有空间需要签名
 	if s.config.QiniuPrivate {
 		deadline := time.Now().Add(time.Hour).Unix()
-		return qiniustorage.MakePrivateURL(s.mac, domain, key, deadline), nil
+		return qiniustorage.MakePrivateURLv2(s.mac, baseURL, key, deadline), nil
 	}
 
-	return rawURL, nil
+	return qiniustorage.MakePublicURLv2(baseURL, key), nil
 }
 
 func (s *QiniuStorage) GetFileReader(ctx context.Context, filePath string) (io.ReadCloser, int64, error) {
@@ -396,6 +369,53 @@ func (s *QiniuStorage) normalizeKey(key string) string {
 	return strings.TrimPrefix(key, "/")
 }
 
+func (s *QiniuStorage) newUploadObjectOptions(objectKey, fileName, contentType string, ttl time.Duration) (*uploader.ObjectOptions, error) {
+	key := s.normalizeKey(objectKey)
+	objectName := key
+
+	putPolicy, err := uptoken.NewPutPolicy(s.config.QiniuBucket, time.Now().Add(ttl))
+	if err != nil {
+		return nil, fmt.Errorf("创建上传策略失败: %w", err)
+	}
+
+	return &uploader.ObjectOptions{
+		BucketName:  s.config.QiniuBucket,
+		ObjectName:  &objectName,
+		FileName:    s.resolveUploadFileName(fileName, key),
+		ContentType: strings.TrimSpace(contentType),
+		UpToken:     uptoken.NewSigner(putPolicy, s.cred),
+	}, nil
+}
+
+func (s *QiniuStorage) resolveUploadFileName(fileName, objectKey string) string {
+	if name := strings.TrimSpace(fileName); name != "" {
+		return name
+	}
+	if name := path.Base(objectKey); name != "" && name != "." && name != "/" {
+		return name
+	}
+	return "upload.bin"
+}
+
+func (s *QiniuStorage) getDownloadBaseURL() (string, error) {
+	domain := strings.TrimSpace(s.config.QiniuDomain)
+	if domain == "" {
+		return "", fmt.Errorf("七牛云 CDN 域名未配置")
+	}
+
+	domain = strings.TrimRight(domain, "/")
+	if strings.HasPrefix(domain, "http://") || strings.HasPrefix(domain, "https://") {
+		return domain, nil
+	}
+
+	scheme := "https"
+	if !s.config.QiniuUseHTTPS {
+		scheme = "http"
+	}
+
+	return fmt.Sprintf("%s://%s", scheme, domain), nil
+}
+
 // getUploadRegion 获取上传域名
 func (s *QiniuStorage) getUploadRegion() (string, error) {
 	regionStr := strings.TrimSpace(s.config.QiniuRegion)
@@ -406,12 +426,12 @@ func (s *QiniuStorage) getUploadRegion() (string, error) {
 
 	// 七牛云各区域上传域名
 	regionMap := map[string]string{
-		"z0":         "up-z0.qiniup.com",
-		"z1":         "up-z1.qiniup.com",
-		"z2":         "up-z2.qiniup.com",
-		"na0":        "up-na0.qiniup.com",
-		"as0":        "up-as0.qiniup.com",
-		"cn-east-2":  "up-cn-east-2.qiniup.com",
+		"z0":        "up-z0.qiniup.com",
+		"z1":        "up-z1.qiniup.com",
+		"z2":        "up-z2.qiniup.com",
+		"na0":       "up-na0.qiniup.com",
+		"as0":       "up-as0.qiniup.com",
+		"cn-east-2": "up-cn-east-2.qiniup.com",
 	}
 
 	host, ok := regionMap[regionStr]

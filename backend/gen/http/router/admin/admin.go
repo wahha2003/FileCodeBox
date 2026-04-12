@@ -21,6 +21,7 @@ func Register(r *server.Hertz) {
 		_admin := root.Group("/admin", _adminMw()...)
 		_admin.GET("/config", append(_admingetconfigMw(), admin.AdminGetConfig)...)
 		_admin.PUT("/config", append(_adminupdateconfigMw(), admin.AdminUpdateConfig)...)
+		_admin.PUT("/account", append(_adminupdateaccountMw(), admin.AdminUpdateAccount)...)
 		_admin.GET("/files", append(_adminlistfilesMw(), admin.AdminListFiles)...)
 		_files := _admin.Group("/files", _filesMw()...)
 		_files.DELETE("/:id", append(_admindeletefileMw(), admin.AdminDeleteFile)...)

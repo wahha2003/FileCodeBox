@@ -58,6 +58,32 @@
           </template>
         </el-table-column>
 
+        <el-table-column label="存储类型" width="120" align="center">
+          <template #default="{ row }">
+            <el-tag :type="getStorageTagType(row)" effect="plain">
+              {{ formatStorageType(row) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="访问密码" min-width="220">
+          <template #default="{ row }">
+            <el-tag v-if="!row.require_auth" type="info" effect="plain">
+              无密码
+            </el-tag>
+            <el-input
+              v-else-if="row.access_password_viewable && row.access_password"
+              :model-value="row.access_password"
+              type="password"
+              show-password
+              readonly
+            />
+            <el-tag v-else type="warning" effect="plain">
+              历史数据不可查看
+            </el-tag>
+          </template>
+        </el-table-column>
+
         <el-table-column prop="user_id" label="上传者" width="100" align="center">
           <template #default="{ row }">
             <el-tag v-if="row.user_id" type="info">
@@ -90,17 +116,28 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="100" align="center" fixed="right">
+        <el-table-column label="操作" width="180" align="center" fixed="right">
           <template #default="{ row }">
-            <el-button
-              type="danger"
-              size="small"
-              @click="deleteFile(row)"
-              round
-            >
-              <el-icon><Delete /></el-icon>
-              删除
-            </el-button>
+            <div class="action-buttons">
+              <el-button
+                type="primary"
+                size="small"
+                @click="viewFile(row.code)"
+                round
+              >
+                <el-icon><View /></el-icon>
+                查看
+              </el-button>
+              <el-button
+                type="danger"
+                size="small"
+                @click="deleteFile(row)"
+                round
+              >
+                <el-icon><Delete /></el-icon>
+                删除
+              </el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -125,19 +162,48 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { 
-  Refresh, Document, Picture, Download, Delete,
+  Refresh, Document, Picture, Download, Delete, View,
   VideoPlay, Headset, Reading
 } from '@element-plus/icons-vue'
 import { adminApi } from '@/api/admin'
+import { buildPublicShareUrl } from '@/utils/origin'
+
+type AdminFileItem = {
+  id: number
+  code: string
+  file_name?: string
+  uuid_file_name?: string
+  size: number
+  file_size?: number
+  upload_type?: string
+  is_text_share?: boolean
+  user_id?: number
+  used_count?: number
+  created_at?: string
+  expired_at?: string
+  storage_type?: string
+  storage_type_label?: string
+  require_auth?: boolean
+  access_password?: string
+  access_password_viewable?: boolean
+}
 
 const loading = ref(false)
-const filesList = ref<any[]>([])
+const filesList = ref<AdminFileItem[]>([])
 
 const pagination = reactive({
   page: 1,
   pageSize: 20,
   total: 0
 })
+
+const storageTypeLabels: Record<string, string> = {
+  local: '本地',
+  s3: 'S3',
+  qiniu: '七牛云',
+  upyun: '又拍云',
+  database: '数据库'
+}
 
 const formatFileSize = (bytes: number): string => {
   if (!bytes || bytes === 0) return '0 B'
@@ -147,7 +213,7 @@ const formatFileSize = (bytes: number): string => {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
 
-const formatDate = (dateStr: string): string => {
+const formatDate = (dateStr?: string): string => {
   if (!dateStr) return '-'
   try {
     return new Date(dateStr).toLocaleString('zh-CN')
@@ -156,7 +222,7 @@ const formatDate = (dateStr: string): string => {
   }
 }
 
-const isExpired = (dateStr: string): boolean => {
+const isExpired = (dateStr?: string): boolean => {
   if (!dateStr) return false
   try {
     return new Date(dateStr) < new Date()
@@ -165,7 +231,7 @@ const isExpired = (dateStr: string): boolean => {
   }
 }
 
-const getFileIcon = (row: any) => {
+const getFileIcon = (row: AdminFileItem) => {
   const filename = row.file_name || row.uuid_file_name || ''
   const ext = filename.split('.').pop()?.toLowerCase()
   
@@ -183,7 +249,7 @@ const getFileIcon = (row: any) => {
   return iconMap[ext || ''] || Document
 }
 
-const getFileIconColor = (row: any) => {
+const getFileIconColor = (row: AdminFileItem) => {
   const filename = row.file_name || row.uuid_file_name || ''
   const ext = filename.split('.').pop()?.toLowerCase()
   
@@ -199,6 +265,29 @@ const getFileIconColor = (row: any) => {
   }
   
   return colorMap[ext || ''] || '#606266'
+}
+
+const formatStorageType = (row: AdminFileItem): string => {
+  if (row.storage_type_label) return row.storage_type_label
+  if (row.storage_type) return storageTypeLabels[row.storage_type] || row.storage_type
+  return row.is_text_share ? '数据库' : '未记录'
+}
+
+const getStorageTagType = (row: AdminFileItem): string => {
+  switch (row.storage_type) {
+    case 's3':
+      return 'success'
+    case 'qiniu':
+      return 'warning'
+    case 'upyun':
+      return 'primary'
+    case 'database':
+      return 'info'
+    case 'local':
+      return 'info'
+    default:
+      return row.is_text_share ? 'info' : 'danger'
+  }
 }
 
 const fetchFiles = async () => {
@@ -232,7 +321,11 @@ const fetchFiles = async () => {
   }
 }
 
-const deleteFile = async (file: any) => {
+const viewFile = (code: string) => {
+  window.location.href = buildPublicShareUrl(code)
+}
+
+const deleteFile = async (file: AdminFileItem) => {
   try {
     await ElMessageBox.confirm(
       `确定要删除文件 ${file.file_name || file.uuid_file_name || file.code} 吗？`,
@@ -388,6 +481,13 @@ onMounted(() => {
   margin-top: 24px;
   display: flex;
   justify-content: center;
+}
+
+.action-buttons {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 
 :deep(.el-table) {

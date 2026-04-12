@@ -1,104 +1,89 @@
-server:
-  host: "0.0.0.0"
-  port: 12345
-  mode: "debug"
-  base_url: "http://api.localhost:12345"
-  public_base_url: "http://localhost:3000"
-  read_timeout: 30
-  write_timeout: 30
-
-database:
-  driver: "sqlite"
-  # SQLite 配置：文件路径或 ":memory:" 表示内存数据库
-  db_name: "./data/fileCodeBox.db"
-
-redis:
-  host: "localhost"
-  port: 6379
-  password: ""
-  db: 0
-
-log:
-  level: "info"
-  filename: ""
-  max_size: 100
-  max_backups: 10
-  max_age: 30
-  compress: true
-
 app:
-  name: "FileCodeBox"
-  version: "1.0.0"
-  description: "开箱即用的文件快传系统"
-  keywords: "FileCodeBox, 文件快递柜, 口令传送箱, 匿名口令分享文本, 文件"
-  datapath: "./data"
-  production: false
-
-# 上传配置
-upload:
-  open_upload: true
-  upload_size: 10485760      # 10MB
-  enable_chunk: true
-  chunk_size: 5242880        # 5MB（S3 分片上传最小要求）
-  share_code_length: 4      # 分享码长度
-  share_code_charset: "0123456789"  # 分享码字符集
-  max_save_seconds: 0      # 0 表示永不过期
-  require_login: false
-
-# 下载配置
+    datapath: ./data
+    description: 开箱即用的文件快传系统
+    keywords: FileCodeBox, 文件快递柜, 口令传送箱, 匿名口令分享文本, 文件
+    name: FileCodeBox
+    production: false
+    version: 1.0.0
+database:
+    db_name: ./data/fileCodeBox.db
+    driver: sqlite
 download:
-  enable_concurrent_download: true
-  max_concurrent_downloads: 10
-  download_timeout: 300     # 5分钟
-  require_login: false
-
-# 存储配置
+    download_timeout: 300
+    enable_concurrent_download: true
+    max_concurrent_downloads: 10
+    require_login: false
+log:
+    compress: true
+    filename: ""
+    level: info
+    max_age: 30
+    max_backups: 10
+    max_size: 100
+redis:
+    db: 0
+    host: localhost
+    password: ""
+    port: 6379
+server:
+    base_url: http://api.localhost:12345
+    host: 0.0.0.0
+    mode: debug
+    port: 12345
+    public_base_url: http://localhost:3000
+    read_timeout: 30
+    write_timeout: 30
 storage:
-  type: "local"              # local, s3, qiniu, upyun
-  storage_path: "./data/uploads"
-  s3:
-    access_key_id: ""
-    secret_access_key: ""
-    bucket_name: ""
-    endpoint_url: ""
-    region_name: "us-east-1"
-    hostname: ""
-    proxy: ""
-    signed_url_expiry: 3600  # 预签名 URL 有效期（秒）
-  qiniu:
-    access_key: ""
-    secret_key: ""
-    bucket: ""
-    domain: ""               # CDN 域名
-    region: ""               # 区域: z0/z1/z2/na0/as0/cn-east-2
-    use_https: true
-    private: false           # 是否私有空间
-  upyun:
-    bucket: ""               # 服务名
-    operator: ""             # 操作员
-    password: ""             # 操作密码
-    domain: ""               # CDN 域名
-    secret: ""               # Token 防盗链密钥
-
-# 用户配置
-user:
-  allow_user_registration: false
-  require_email_verify: false
-  user_upload_size: 52428800    # 50MB
-  user_storage_quota: 1073741824 # 1GB
-  session_expiry_hours: 168     # 7天
-  max_sessions_per_user: 5
-  jwt_secret: "FileCodeBox2025JWT"
-
-# UI 配置
+    qiniu:
+        access_key: S7Z0jpuYOSCQeSxF1_oI3I_J8y_sZjFSNUyEiEUi
+        bucket: memos1
+        domain: cdn.kodo.nmcb.cc
+        private: true
+        region: z2
+        secret_key: e97MfCSsPdYmka3axIauHFekjrlS25VMYCfZW_HH
+        use_https: true
+    s3:
+        access_key_id: ""
+        bucket_name: ""
+        endpoint_url: ""
+        hostname: ""
+        proxy: ""
+        region_name: us-east-1
+        secret_access_key: ""
+        signed_url_expiry: 3600
+    storage_path: ./data/uploads
+    type: upyun
+    upyun:
+        bucket: kunvideo
+        domain: vdo.nmcb.cc
+        operator: filebox
+        password: ivJawKjfrqqRO9SphEONrNBJITjZm4p3
+        secret: 74931f9bfee24dc8b9b9273c35b86eca
 ui:
-  theme: "themes/2025"
-  background: ""
-  page_explain: "请勿上传或分享违法内容。根据《中华人民共和国网络安全法》、《中华人民共和国刑法》、《中华人民共和国治安管理处罚法》等相关规定。传播或存储违法、违规内容，会受到相关处罚，严重者将承担刑事责任。本站坚决配合相关部门，确保网络内容的安全，和谐，打造绿色网络环境。"
-  robots_text: |
-    User-agent: *
-    Disallow: /
-  show_admin_addr: false
-  opacity: 1
-  notify_title: ""
-  notify_content: ""
+    background: ""
+    notify_content: ""
+    notify_title: ""
+    opacity: 1
+    page_explain: 请勿上传或分享违法内容。根据《中华人民共和国网络安全法》、《中华人民共和国刑法》、《中华人民共和国治安管理处罚法》等相关规定。传播或存储违法、违规内容，会受到相关处罚，严重者将承担刑事责任。本站坚决配合相关部门，确保网络内容的安全，和谐，打造绿色网络环境。
+    robots_text: |
+        User-agent: *
+        Disallow: /
+    show_admin_addr: false
+    theme: themes/2025
+upload:
+    chunk_size: 5242880
+    enable_chunk: true
+    max_save_seconds: 0
+    open_upload: true
+    require_login: false
+    share_code_charset: "0123456789"
+    share_code_length: 4
+    upload_size: 10737418240
+user:
+    allow_user_registration: false
+    jwt_secret: FileCodeBox2025JWT
+    max_sessions_per_user: 5
+    require_email_verify: false
+    session_expiry_hours: 168
+    user_storage_quota: 1073741824
+    user_upload_size: 52428800

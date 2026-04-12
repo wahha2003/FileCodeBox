@@ -11,9 +11,11 @@ import (
 	admin "github.com/zy84338719/fileCodeBox/backend/gen/http/model/admin"
 	adminsvc "github.com/zy84338719/fileCodeBox/backend/internal/app/admin"
 	"github.com/zy84338719/fileCodeBox/backend/internal/conf"
+	"github.com/zy84338719/fileCodeBox/backend/internal/pkg/accesspassword"
 	"github.com/zy84338719/fileCodeBox/backend/internal/repo/db/dao"
 	dbmodel "github.com/zy84338719/fileCodeBox/backend/internal/repo/db/model"
 	"github.com/zy84338719/fileCodeBox/backend/internal/storage"
+	"golang.org/x/crypto/bcrypt"
 )
 
 var adminService *adminsvc.Service
@@ -399,11 +401,131 @@ func AdminUpdateConfig(ctx context.Context, c *app.RequestContext) {
 		cfg.Storage.StoragePath = strings.TrimSpace(req.Config.Storage.StoragePath)
 	}
 
+	if err := conf.SaveGlobalConfig(); err != nil {
+		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
+			"code":    500,
+			"message": "保存配置文件失败: " + err.Error(),
+		})
+		return
+	}
+
 	c.JSON(consts.StatusOK, map[string]interface{}{
 		"code":    200,
 		"message": "保存成功",
 	})
 }
+
+// AdminUpdateAccount .
+// @router /admin/account [PUT]
+func AdminUpdateAccount(ctx context.Context, c *app.RequestContext) {
+	var req struct {
+		Username    string `json:"username,omitempty"`
+		OldPassword string `json:"old_password"`
+		NewPassword string `json:"new_password"`
+	}
+	if err := c.Bind(&req); err != nil {
+		c.JSON(consts.StatusBadRequest, map[string]interface{}{
+			"code":    400,
+			"message": "请求参数错误: " + err.Error(),
+		})
+		return
+	}
+
+	// 验证请求参数
+	if req.OldPassword == "" || req.NewPassword == "" {
+		c.JSON(consts.StatusBadRequest, map[string]interface{}{
+			"code":    400,
+			"message": "密码不能为空",
+		})
+		return
+	}
+
+	// 从 context 获取当前用户的 ID
+	userIDVal, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(consts.StatusUnauthorized, map[string]interface{}{
+			"code":    401,
+			"message": "未授权的访问",
+		})
+		return
+	}
+	var userID uint
+	switch v := userIDVal.(type) {
+	case float64:
+		userID = uint(v)
+	case uint:
+		userID = v
+	case int:
+		userID = uint(v)
+	default:
+		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
+			"code":    500,
+			"message": "服务器内部错误：无效的用户标识",
+		})
+		return
+	}
+
+	// 修改管理员密码
+    // 直接使用 UserRepository 操作数据库
+	userRepo := dao.NewUserRepository()
+	user, err := userRepo.GetByID(ctx, userID)
+	if err != nil {
+		c.JSON(consts.StatusNotFound, map[string]interface{}{
+			"code":    404,
+			"message": "找不到管理员用户",
+		})
+		return
+	}
+
+	// 验证旧密码
+	importBcrypt := false
+	_ = importBcrypt // to bypass compiler if unused
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.OldPassword)); err != nil {
+		c.JSON(consts.StatusBadRequest, map[string]interface{}{
+			"code":    400,
+			"message": "旧密码不正确",
+		})
+		return
+	}
+
+	// 如果有新用户名，并且不一样，则验证用户名是否被占用
+	if req.Username != "" && req.Username != user.Username {
+		existingUser, checkErr := userRepo.GetByUsername(ctx, req.Username)
+		if checkErr == nil && existingUser != nil {
+			c.JSON(consts.StatusBadRequest, map[string]interface{}{
+				"code":    400,
+				"message": "该用户名已被使用",
+			})
+			return
+		}
+		user.Username = req.Username
+	}
+
+	// 更新密码
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
+			"code":    500,
+			"message": "加密密码失败",
+		})
+		return
+	}
+	user.PasswordHash = string(hashedPassword)
+
+	if err := userRepo.Update(ctx, user); err != nil {
+		c.JSON(consts.StatusInternalServerError, map[string]interface{}{
+			"code":    500,
+			"message": "更新管理员账号密码失败",
+		})
+		return
+	}
+
+	c.JSON(consts.StatusOK, map[string]interface{}{
+		"code":    200,
+		"message": "修改账号密码成功，请重新登录",
+	})
+}
+
 
 func normalizePage(value, fallback int) int {
 	if value < 1 {
@@ -454,20 +576,27 @@ func fileDisplayName(file *dbmodel.FileCode) string {
 
 func buildAdminFileItem(file *dbmodel.FileCode) map[string]interface{} {
 	isText := file.FilePath == ""
+	storageType := normalizeAdminFileStorageType(file)
+	accessPassword, accessPasswordViewable := adminAccessPassword(file)
 	item := map[string]interface{}{
-		"id":             file.ID,
-		"code":           file.Code,
-		"file_name":      fileDisplayName(file),
-		"uuid_file_name": fileDisplayName(file),
-		"size":           file.Size,
-		"file_size":      file.Size,
-		"used_count":     file.UsedCount,
-		"download_count": file.UsedCount,
-		"created_at":     file.CreatedAt.Format("2006-01-02 15:04:05"),
-		"expired_at":     formatAdminTime(file.ExpiredAt),
-		"is_text_share":  isText,
-		"upload_type":    map[bool]string{true: "text", false: "file"}[isText],
-		"text":           "",
+		"id":                       file.ID,
+		"code":                     file.Code,
+		"file_name":                fileDisplayName(file),
+		"uuid_file_name":           fileDisplayName(file),
+		"size":                     file.Size,
+		"file_size":                file.Size,
+		"used_count":               file.UsedCount,
+		"download_count":           file.UsedCount,
+		"created_at":               file.CreatedAt.Format("2006-01-02 15:04:05"),
+		"expired_at":               formatAdminTime(file.ExpiredAt),
+		"is_text_share":            isText,
+		"upload_type":              map[bool]string{true: "text", false: "file"}[isText],
+		"storage_type":             storageType,
+		"storage_type_label":       adminStorageTypeLabel(storageType, isText),
+		"require_auth":             file.RequireAuth,
+		"access_password":          accessPassword,
+		"access_password_viewable": accessPasswordViewable,
+		"text":                     "",
 	}
 	if isText {
 		item["text"] = file.Text
@@ -475,6 +604,53 @@ func buildAdminFileItem(file *dbmodel.FileCode) map[string]interface{} {
 		item["uuid_file_name"] = ""
 	}
 	return item
+}
+
+func adminAccessPassword(file *dbmodel.FileCode) (string, bool) {
+	if file == nil || !file.RequireAuth || strings.TrimSpace(file.AccessPasswordEnc) == "" {
+		return "", false
+	}
+
+	password, err := accesspassword.Decrypt(file.AccessPasswordEnc)
+	if err != nil {
+		return "", false
+	}
+
+	return password, password != ""
+}
+
+func normalizeAdminFileStorageType(file *dbmodel.FileCode) string {
+	if file == nil {
+		return ""
+	}
+
+	storageType := strings.ToLower(strings.TrimSpace(file.StorageType))
+	if storageType == "" && file.FilePath == "" {
+		return "database"
+	}
+	return storageType
+}
+
+func adminStorageTypeLabel(storageType string, isText bool) string {
+	switch storageType {
+	case "local":
+		return "本地"
+	case "s3":
+		return "S3"
+	case "qiniu":
+		return "七牛云"
+	case "upyun":
+		return "又拍云"
+	case "database":
+		return "数据库"
+	case "":
+		if isText {
+			return "数据库"
+		}
+		return "未记录"
+	default:
+		return storageType
+	}
 }
 
 func buildAdminUserItem(user *dbmodel.UserResp) map[string]interface{} {
@@ -505,6 +681,6 @@ func deletePhysicalFile(ctx context.Context, file *dbmodel.FileCode) {
 		return
 	}
 
-	storageService := storage.NewConfiguredStorage(conf.GetGlobalConfig(), "")
+	storageService := storage.NewConfiguredStorageWithType(conf.GetGlobalConfig(), strings.TrimSpace(file.StorageType), "")
 	_ = storageService.DeleteFile(ctx, file.GetFilePath())
 }
